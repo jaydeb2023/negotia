@@ -10,7 +10,8 @@ export default function Practice() {
   const [loadingScenario, setLoadingScenario] = useState(true);
   const [traineeName, setTraineeName] = useState('');
   const [started, setStarted] = useState(false);
-  const [status, setStatus] = useState('Ready');
+  const [status, setStatus] = useState('idle'); // idle | listening | transcribing | thinking | speaking | saving | missed
+  const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState([]);
   const [history, setHistory] = useState([]);
   const mediaRecorderRef = useRef(null);
@@ -44,11 +45,17 @@ export default function Practice() {
     setTranscript([]);
     setHistory([]);
     addBubble(scenario.name, scenario.opening_line);
-    speak(scenario.opening_line, startListening);
+    speak(scenario.opening_line, () => setStatus('idle'));
   }
 
-  async function startListening() {
+  async function toggleMic() {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
     setStatus('listening');
+    setIsRecording(true);
     chunksRef.current = [];
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mr = new MediaRecorder(stream);
@@ -56,10 +63,6 @@ export default function Practice() {
     mr.onstop = handleRecordingStop;
     mr.start();
     mediaRecorderRef.current = mr;
-  }
-
-  function stopListening() {
-    mediaRecorderRef.current?.stop();
   }
 
   async function handleRecordingStop() {
@@ -100,6 +103,7 @@ export default function Practice() {
   async function endCall() {
     speechSynthesis.cancel();
     setStarted(false);
+    setIsRecording(false);
     setStatus('saving');
 
     const lastLine = [...transcript].reverse().find((t) => t.who === scenario.name)?.text || '';
@@ -127,9 +131,12 @@ export default function Practice() {
   }
 
   const statusLabel = {
-    idle: 'Tap Speak when ready', listening: 'Listening…', transcribing: 'Transcribing…',
-    thinking: 'Thinking…', speaking: 'Speaking…', saving: 'Saving…', missed: "Didn't catch that — try again", Ready: 'Ready',
+    idle: 'Tap the mic to speak', listening: 'Listening…', transcribing: 'Transcribing…',
+    thinking: `${scenario?.name || 'They'} is thinking…`, speaking: `${scenario?.name || 'They'} is speaking…`,
+    saving: 'Saving session…', missed: "Didn't catch that — try again",
   }[status] || status;
+
+  const ringClass = status === 'listening' ? 'ring-listen' : status === 'speaking' ? 'ring-speak' : status === 'thinking' ? 'ring-think' : '';
 
   if (loadingScenario) return <div className="page">Loading…</div>;
   if (!scenario) return <div className="page">Scenario not found. <a href="/">Go back</a></div>;
@@ -137,32 +144,35 @@ export default function Practice() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>{scenario.avatar_emoji} {scenario.name}</h1>
+        <h1>{scenario.name}</h1>
         <p>{scenario.tagline}</p>
       </div>
 
-      {!started && (
-        <div className="card" style={{ padding: 20, maxWidth: 420, marginBottom: 20 }}>
-          <div className="field">
+      {!started ? (
+        <div className="card call-stage">
+          <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
+          <div className="field" style={{ maxWidth: 280, margin: '18px auto 0' }}>
             <label>Your name</label>
             <input className="input" value={traineeName} onChange={(e) => setTraineeName(e.target.value)} />
           </div>
-          <button className="btn-primary" onClick={startCall}>Start Call</button>
+          <button className="btn-primary" style={{ marginTop: 14 }} onClick={startCall}>Start Call</button>
         </div>
-      )}
-
-      {started && (
-        <>
-          <div className="status-badge">
-            <span className={`status-dot ${status === 'listening' ? 'live' : status === 'speaking' ? 'speak' : ''}`}></span>
-            {statusLabel}
+      ) : (
+        <div className="card call-stage">
+          <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
+          <p className="call-status">{statusLabel}</p>
+          <div className="call-controls">
+            <button
+              className={`fab-mic ${isRecording ? 'is-recording' : ''}`}
+              onClick={toggleMic}
+              disabled={status === 'thinking' || status === 'speaking'}
+              aria-label="Toggle microphone"
+            >
+              {isRecording ? '■' : '🎤'}
+            </button>
+            <button className="fab-end" onClick={endCall} aria-label="End call">✕</button>
           </div>
-          <div className="actions">
-            <button className="btn-primary" onClick={startListening}>🎤 Speak</button>
-            <button className="btn-ghost" onClick={stopListening}>Stop</button>
-            <button className="btn-danger" onClick={endCall}>End Call</button>
-          </div>
-        </>
+        </div>
       )}
 
       <div className="card transcript">
