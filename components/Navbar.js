@@ -1,11 +1,13 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 
 export default function Navbar() {
   const router = useRouter();
   const { user, profile, isAdmin } = useAuth();
+  const [logoOk, setLogoOk] = useState(true);
   const isActive = (path) => router.pathname === path;
 
   async function logout() {
@@ -17,7 +19,12 @@ export default function Navbar() {
     <nav className="navbar">
       <div className="navbar-inner">
         <Link href="/" className="brand">
-          <span className="brand-mark">T</span> Transcend
+          {logoOk ? (
+            <img src="/logo.png" alt="Transcend" className="brand-logo-img" onError={() => setLogoOk(false)} />
+          ) : (
+            <span className="brand-mark">T</span>
+          )}
+          Transcend
         </Link>
         {user && (
           <div className="nav-links">
