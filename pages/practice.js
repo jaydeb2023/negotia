@@ -1,14 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../lib/AuthContext';
 
 export default function Practice() {
   const router = useRouter();
   const { scenario: scenarioId } = router.query;
+  const { user, profile } = useAuth();
 
   const [scenario, setScenario] = useState(null);
   const [loadingScenario, setLoadingScenario] = useState(true);
-  const [traineeName, setTraineeName] = useState('');
   const [started, setStarted] = useState(false);
   const [status, setStatus] = useState('idle'); // idle | listening | transcribing | thinking | speaking | saving | missed
   const [isRecording, setIsRecording] = useState(false);
@@ -40,7 +41,6 @@ export default function Practice() {
   }
 
   async function startCall() {
-    if (!traineeName.trim()) { alert('Enter your name first'); return; }
     setStarted(true);
     setTranscript([]);
     setHistory([]);
@@ -77,7 +77,10 @@ export default function Practice() {
     });
     const tData = await tRes.json();
     const said = tData.text?.trim();
-    if (!said) { setStatus('missed'); return; }
+    if (!said) {
+      setStatus('missed');
+      return;
+    }
 
     addBubble('You', said);
     const newHistory = [...history, { role: 'user', content: said }];
@@ -114,29 +117,34 @@ export default function Practice() {
     else if (/next week|think/i.test(lastLine)) { outcome = 'WP1'; }
     else if (/call kar lunga|busy/i.test(lastLine)) { outcome = 'WP2'; }
 
-    await fetch('/api/save-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        traineeName,
-        scenarioId: scenario.id,
-        scenarioName: scenario.name,
-        transcript,
-        outcome,
-        casesOrdered,
-        behaviourScore: 0,
-      }),
-    });
+    await supabase.from('sessions').insert([{
+      user_id: user.id,
+      trainee_name: profile?.full_name || user.email,
+      scenario_id: scenario.id,
+      scenario_name: scenario.name,
+      transcript,
+      outcome,
+      cases_ordered: casesOrdered,
+      behaviour_score: 0,
+    }]);
+
     setStatus('idle');
   }
 
   const statusLabel = {
-    idle: 'Tap the mic to speak', listening: 'Listening…', transcribing: 'Transcribing…',
-    thinking: `${scenario?.name || 'They'} is thinking…`, speaking: `${scenario?.name || 'They'} is speaking…`,
-    saving: 'Saving session…', missed: "Didn't catch that — try again",
+    idle: 'Tap the mic to speak',
+    listening: 'Listening…',
+    transcribing: 'Transcribing…',
+    thinking: `${scenario?.name || 'They'} is thinking…`,
+    speaking: `${scenario?.name || 'They'} is speaking…`,
+    saving: 'Saving session…',
+    missed: "Didn't catch that — try again",
   }[status] || status;
 
-  const ringClass = status === 'listening' ? 'ring-listen' : status === 'speaking' ? 'ring-speak' : status === 'thinking' ? 'ring-think' : '';
+  const ringClass =
+    status === 'listening' ? 'ring-listen' :
+    status === 'speaking' ? 'ring-speak' :
+    status === 'thinking' ? 'ring-think' : '';
 
   if (loadingScenario) return <div className="page">Loading…</div>;
   if (!scenario) return <div className="page">Scenario not found. <a href="/">Go back</a></div>;
@@ -151,11 +159,7 @@ export default function Practice() {
       {!started ? (
         <div className="card call-stage">
           <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
-          <div className="field" style={{ maxWidth: 280, margin: '18px auto 0' }}>
-            <label>Your name</label>
-            <input className="input" value={traineeName} onChange={(e) => setTraineeName(e.target.value)} />
-          </div>
-          <button className="btn-primary" style={{ marginTop: 14 }} onClick={startCall}>Start Call</button>
+          <button className="btn-primary" style={{ marginTop: 22 }} onClick={startCall}>Start Call</button>
         </div>
       ) : (
         <div className="card call-stage">

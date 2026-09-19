@@ -5,8 +5,12 @@ export default async function handler(req, res) {
     const { history, systemPrompt, openingLine } = req.body;
     if (!systemPrompt) return res.status(400).json({ error: 'systemPrompt is required' });
 
+    const strictSuffix = `
+
+STRICT ADHERENCE: Follow every rule above exactly as written — the objection, what you reveal and when, and the exact outcome triggers. Do not invent new objections, new outcomes, or new information beyond what is written above. Do not soften or skip the reveal-gradually rule.`;
+
     const messages = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: systemPrompt + strictSuffix },
       { role: 'assistant', content: openingLine || 'Hello.' },
       ...(history || []),
     ];
@@ -20,7 +24,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages,
-        temperature: 0.7,
+        temperature: 0.35,
         max_tokens: 200,
       }),
     });
