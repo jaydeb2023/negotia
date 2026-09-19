@@ -30,6 +30,13 @@ export default function Login() {
     setBusy(false);
   }
 
+  async function signInWithGoogle() {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/` },
+    });
+  }
+
   return (
     <div className="auth-shell">
       <div className="auth-brandpanel">
@@ -55,6 +62,17 @@ export default function Login() {
           <p className="auth-sub">
             {mode === 'signin' ? 'Sign in to continue your training.' : 'Start practicing in a few seconds.'}
           </p>
+
+          <button type="button" className="btn-google" onClick={signInWithGoogle}>
+            <img
+              src="https://www.gstatic.com/marketing-cms/assets/images/d5/dc/cfe9ce8b4425b410b49b7f2dd3f3/g.webp=s48-fcrop64=1,00000000ffffffff-rw"
+              alt=""
+              width="18"
+              height="18"
+            />
+            Continue with Google
+          </button>
+          <div className="auth-divider"><span>or</span></div>
 
           <form onSubmit={submit}>
             {mode === 'signup' && (

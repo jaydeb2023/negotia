@@ -232,3 +232,13 @@ a[style*="cursor: pointer"]:hover{opacity:.75;}
   .auth-brandpanel{padding:32px 24px; flex:none;}
   .auth-features{display:none;} /* keep mobile compact */
 }
+
+.btn-google{
+  width:100%; display:flex; align-items:center; justify-content:center; gap:10px;
+  background:#fff; border:1px solid var(--border); color:var(--text);
+  padding:11px 18px; font-weight:600; margin-bottom:4px;
+}
+.btn-google:hover{background:#f7f7f8;}
+.auth-divider{display:flex; align-items:center; text-align:center; margin:16px 0; color:var(--muted); font-size:.8rem;}
+.auth-divider::before, .auth-divider::after{content:''; flex:1; border-bottom:1px solid var(--border);}
+.auth-divider span{padding:0 10px;}
