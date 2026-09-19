@@ -7,10 +7,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('sessions').select('*').order('created_at', { ascending: false });
       if (!error) setSessions(data || []);
       setLoading(false);
     }
@@ -24,22 +21,28 @@ export default function Dashboard() {
   }, {});
 
   return (
-    <div className="container">
-      <h1>Admin Dashboard</h1>
+    <div className="page">
+      <div className="page-header">
+        <h1>Admin Dashboard</h1>
+        <p>Every trainee's practice history, across all personas.</p>
+      </div>
+
       {loading && <p>Loading…</p>}
       {!loading && Object.keys(grouped).length === 0 && <p>No sessions yet.</p>}
+
       {Object.entries(grouped).map(([name, rows]) => (
-        <div key={name} className="userBlock">
+        <div key={name} className="card userBlock">
           <h2>{name}</h2>
           <table>
             <thead>
-              <tr><th>Date</th><th>Outcome</th><th>Cases</th><th>Behaviour</th></tr>
+              <tr><th>Date</th><th>Persona</th><th>Outcome</th><th>Cases</th><th>Behaviour</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td>{new Date(r.created_at).toLocaleString()}</td>
-                  <td>{r.outcome}</td>
+                  <td>{r.scenario_name || '—'}</td>
+                  <td><span className={`outcome-tag ${r.outcome}`}>{r.outcome}</span></td>
                   <td>{r.cases_ordered}</td>
                   <td>{r.behaviour_score}</td>
                 </tr>

@@ -1,16 +1,13 @@
-// Calls Groq's LLM (OpenAI-compatible endpoint) so Gupta Ji can reply.
-
-import { GUPTA_JI_SYSTEM_PROMPT, OPENING_LINE } from '../../lib/guptaJiPrompt';
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    const { history } = req.body; // [{role:'user'|'assistant', content:string}, ...]
+    const { history, systemPrompt, openingLine } = req.body;
+    if (!systemPrompt) return res.status(400).json({ error: 'systemPrompt is required' });
 
     const messages = [
-      { role: 'system', content: GUPTA_JI_SYSTEM_PROMPT },
-      { role: 'assistant', content: OPENING_LINE },
+      { role: 'system', content: systemPrompt },
+      { role: 'assistant', content: openingLine || 'Hello.' },
       ...(history || []),
     ];
 
