@@ -2,9 +2,16 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabaseClient';
 
+const FILTERS = [
+  { label: 'All levels', match: () => true },
+  { label: 'Beginner', match: (d) => d <= 2 },
+  { label: 'Advanced', match: (d) => d >= 3 },
+];
+
 export default function Home() {
   const [scenarios, setScenarios] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState(0);
   const router = useRouter();
 
   useEffect(() => {
@@ -20,34 +27,54 @@ export default function Home() {
     load();
   }, []);
 
+  const filtered = scenarios.filter((s) => FILTERS[activeFilter].match(s.difficulty));
+
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Choose who to practice with</h1>
-        <p>Each persona negotiates differently — start with an easier one and work up.</p>
+    <>
+      <div className="hero">
+        <div className="hero-inner">
+          <span className="hero-eyebrow">SALES NEGOTIATION TRAINING</span>
+          <h1>Practice negotiating before it counts</h1>
+          <p>Pick an AI persona below and run a real, spoken negotiation — no two conversations play out the same way.</p>
+        </div>
       </div>
 
-      {loading && <p>Loading scenarios…</p>}
-      {!loading && scenarios.length === 0 && (
-        <p>No scenarios yet — add one from the <a href="/admin">Admin</a> panel.</p>
-      )}
+      <div className="page">
+        <div className="filter-row">
+          {FILTERS.map((f, i) => (
+            <button
+              key={f.label}
+              className={`chip ${activeFilter === i ? 'chip-active' : ''}`}
+              onClick={() => setActiveFilter(i)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
 
-      <div className="grid">
-        {scenarios.map((s) => (
-          <div
-            key={s.id}
-            className="card scenario-card"
-            onClick={() => router.push(`/practice?scenario=${s.id}`)}
-          >
-            <div className="scenario-top">
-              <span className="avatar-emoji">{s.avatar_emoji}</span>
-              <span className={`difficulty d${s.difficulty}`}>Level {s.difficulty}</span>
+        {loading && <p>Loading scenarios…</p>}
+        {!loading && filtered.length === 0 && (
+          <p>No scenarios in this filter yet — try "All levels", or add one from <a href="/admin">Admin</a>.</p>
+        )}
+
+        <div className="grid">
+          {filtered.map((s) => (
+            <div key={s.id} className="card scenario-card-v2" onClick={() => router.push(`/practice?scenario=${s.id}`)}>
+              <div className={`scenario-banner d${s.difficulty}`}>
+                <span className="avatar-emoji-lg">{s.avatar_emoji}</span>
+              </div>
+              <div className="scenario-body">
+                <div className="scenario-top">
+                  <h3>{s.name}</h3>
+                  <span className={`difficulty d${s.difficulty}`}>Level {s.difficulty}</span>
+                </div>
+                <p className="tagline">{s.tagline}</p>
+                <span className="scenario-cta">Start practice →</span>
+              </div>
             </div>
-            <h3>{s.name}</h3>
-            <p className="tagline">{s.tagline}</p>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
