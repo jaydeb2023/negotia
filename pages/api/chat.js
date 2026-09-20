@@ -2,6 +2,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
+    // Fail fast and clearly if the key is missing, instead of letting Groq's
+    // generic "model does not exist" error mask the real problem.
+    if (!process.env.GROQ_API_KEY) {
+      console.error('GROQ_API_KEY is not set in this environment.');
+      return res.status(500).json({ error: 'Server misconfiguration: GROQ_API_KEY is missing.' });
+    }
+
     const { history, systemPrompt, openingLine } = req.body;
     if (!systemPrompt) return res.status(400).json({ error: 'systemPrompt is required' });
 
@@ -31,13 +38,20 @@ STRICT ADHERENCE: Follow every rule above exactly as written — the objection, 
 
     if (!groqRes.ok) {
       const errText = await groqRes.text();
-      return res.status(groqRes.status).json({ error: errText });
+      // Log the full Groq error server-side so it shows up in Vercel Runtime Logs,
+      // even though the client only gets a generic message.
+      console.error('Groq API error:', groqRes.status, errText);
+      return res.status(groqRes.status).json({
+        error: 'Failed to get a response from the AI model.',
+        details: errText,
+      });
     }
 
     const data = await groqRes.json();
     const reply = data.choices?.[0]?.message?.content?.trim() || 'Thik hai, aage boliye.';
     res.status(200).json({ reply });
   } catch (err) {
+    console.error('Unhandled error in /api/chat:', err);
     res.status(500).json({ error: err.message });
   }
 }
