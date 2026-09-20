@@ -13,11 +13,10 @@ export const config = {
 //   (e.g. "hello" -> "आवारीओ"). The prompt below fixes that: it is written the way
 //   we WANT the output to look (Hindi in Devanagari, English business words in
 //   English letters), and Whisper copies that style. Max ~224 tokens.
-// EDIT this to include names / product words your trainees actually say.
+// Keep it to plain vocabulary (NOT a full sales sentence): on quiet or unclear audio Whisper can
+// repeat prompt text as if it had been spoken. EDIT the word list to match your products.
 const HINGLISH_PROMPT =
-  'नमस्ते गुप्ता जी, मैं Transcend से बोल रहा हूँ। क्या मैं आपको अपने product के बारे में बता सकता हूँ? ' +
-  'हमारा margin अच्छा है और delivery time पर होती है। आप दो case का trial order confirm कर दीजिए। ' +
-  'Price, discount, scheme और stock के बारे में बात करते हैं।';
+  'नमस्ते जी, मैं Transcend से बोल रहा हूँ। Product, margin, delivery, stock, price, discount, scheme, trial और order के बारे में बात हो रही है।';
 
 // Override without a code change: set WHISPER_LANGUAGE in Vercel env vars
 // (e.g. "en"). Defaults to Hindi.

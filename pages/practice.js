@@ -66,6 +66,7 @@ export default function Practice() {
   const historyRef = useRef([]);
   const transcriptRef = useRef([]);
   const scenarioRef = useRef(null);
+  const callIdRef = useRef(0); // changes on every new/ended call, so late results from an OLD call are ignored
   const utterRef = useRef([]); // keeps utterances alive so Chrome doesn't GC them before onend fires
 
   const mediaRecorderRef = useRef(null);
@@ -105,6 +106,11 @@ export default function Practice() {
       stopEverything(); // cleanup on unmount
     };
   }, []);
+
+  // True only while the call this callback belongs to is still the live one.
+  function alive(callId) {
+    return startedRef.current && callIdRef.current === callId;
+  }
 
   function addBubble(who, text) {
     transcriptRef.current = [...transcriptRef.current, { who, text }];
@@ -180,20 +186,31 @@ export default function Practice() {
     setIsRecording(false);
   }
 
-  function startCall() {
-    const sc = scenarioRef.current;
-    startedRef.current = true;
+  // Wipes everything from any previous call so a new test always starts completely fresh.
+  function resetCallState() {
+    startedRef.current = false;
+    callIdRef.current += 1; // invalidates any request/timer still running from an older call
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+    stopEverything();
     historyRef.current = [];
     transcriptRef.current = [];
-    setResult(null);
-    setStarted(true);
+    chunksRef.current = [];
     setTranscript([]);
-    addBubble(sc.name, sc.opening_line);
-    speak(sc.opening_line, startListening);
+    setResult(null);
   }
 
-  async function startListening() {
-    if (!startedRef.current) return; // call was ended while we were speaking/waiting
+  function startCall() {
+    const sc = scenarioRef.current;
+    resetCallState();
+    startedRef.current = true;
+    const callId = callIdRef.current;
+    setStarted(true);
+    addBubble(sc.name, sc.opening_line);
+    speak(sc.opening_line, () => startListening(callId));
+  }
+
+  async function startListening(callId = callIdRef.current) {
+    if (!alive(callId)) return; // call was ended (or a newer call started) while we were waiting
     console.log('[startListening] called');
     try {
       setStatus('listening');
@@ -202,7 +219,7 @@ export default function Practice() {
       quietSinceRef.current = null;
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!startedRef.current) { // ended while the permission prompt / mic was opening
+      if (!alive(callId)) { // ended while the permission prompt / mic was opening
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -218,7 +235,7 @@ export default function Practice() {
 
       const mr = new MediaRecorder(stream);
       mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
-      mr.onstop = handleRecordingStop;
+      mr.onstop = () => handleRecordingStop(callId);
       mr.start();
       mediaRecorderRef.current = mr;
       setIsRecording(true);
@@ -278,14 +295,14 @@ export default function Practice() {
     stopListeningAndSend();
   }
 
-  function listenAgain(delayMs) {
-    setTimeout(() => { if (startedRef.current) startListening(); }, delayMs);
+  function listenAgain(delayMs, callId) {
+    setTimeout(() => startListening(callId), delayMs); // startListening ignores it if the call is over
   }
 
-  async function handleRecordingStop() {
+  async function handleRecordingStop(callId) {
     console.log('[handleRecordingStop] triggered');
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-    if (!startedRef.current) return; // call was ended (this fires when tracks stop too)
+    if (!alive(callId)) return; // call was ended or replaced (this also fires when tracks stop)
 
     const sc = scenarioRef.current;
 
@@ -295,7 +312,7 @@ export default function Practice() {
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
       if (blob.size < MIN_AUDIO_BYTES) {
         setStatus('missed');
-        listenAgain(1200);
+        listenAgain(1200, callId);
         return;
       }
       const base64 = await blobToBase64(blob);
@@ -310,10 +327,10 @@ export default function Practice() {
       const said = tData.text?.trim();
       console.log('[handleRecordingStop] transcribed:', said);
 
-      if (!startedRef.current) return;
+      if (!alive(callId)) return;
       if (!said) {
         setStatus('missed');
-        listenAgain(1200);
+        listenAgain(1200, callId);
         return;
       }
 
@@ -335,23 +352,24 @@ export default function Practice() {
       const reply = cData.reply || 'ठीक है, आगे बोलिए।';
       console.log('[handleRecordingStop] AI reply:', reply, '| started:', startedRef.current);
 
-      if (!startedRef.current) return;
+      if (!alive(callId)) return;
       addBubble(sc.name, reply);
       historyRef.current = [...historyRef.current, { role: 'assistant', content: reply }];
 
       // auto-loop back to listening once Gupta Ji finishes speaking
-      speak(reply, () => { if (startedRef.current) startListening(); });
+      speak(reply, () => startListening(callId));
     } catch (err) {
       // A single failed request should not kill the whole conversation.
       console.error('[handleRecordingStop] error:', err);
-      if (!startedRef.current) return;
+      if (!alive(callId)) return;
       setStatus('error');
-      listenAgain(1500);
+      listenAgain(1500, callId);
     }
   }
 
   async function endCall() {
     startedRef.current = false; // must be first: tells every pending callback to stop
+    callIdRef.current += 1;     // and marks this call as finished for good
     speechSynthesis.cancel();
     stopEverything();
     setStarted(false);
@@ -510,7 +528,7 @@ export default function Practice() {
             onClick={startCall}
             disabled={busyAfterCall}
           >
-            {status === 'scoring' ? 'Scoring your call…' : status === 'saving' ? 'Saving…' : 'Start Call'}
+            {status === 'scoring' ? 'Scoring your call…' : status === 'saving' ? 'Saving…' : result ? '🔄 Start new test' : 'Start Call'}
           </button>
         </div>
       ) : (
@@ -547,10 +565,23 @@ export default function Practice() {
               </button>
             </div>
           )}
+          <button
+            className="btn-primary"
+            style={{ marginTop: 8 }}
+            onClick={startCall}
+            disabled={busyAfterCall}
+          >
+            🔄 Start new test
+          </button>
         </div>
       )}
 
       <div className="card transcript">
+        {!started && transcript.length > 0 && (
+          <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 8px' }}>
+            Previous call. Press “Start new test” to begin a fresh conversation.
+          </p>
+        )}
         {transcript.map((t, i) => (
           <div key={i} className={t.who === 'You' ? 'bubble you' : 'bubble gupta'}>
             <span className="who">{t.who}</span>{t.text}
