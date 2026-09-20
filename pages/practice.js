@@ -320,7 +320,7 @@ export default function Practice() {
       const tRes = await fetch('/api/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm' }),
+        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/webm', nameHint: sc.name }),
       });
       if (!tRes.ok) throw new Error(`transcribe failed (${tRes.status})`);
       const tData = await tRes.json();

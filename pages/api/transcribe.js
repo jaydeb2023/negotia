@@ -23,11 +23,11 @@ const HINGLISH_PROMPT =
 const LANGUAGE = process.env.WHISPER_LANGUAGE || 'hi';
 
 // Whisper sometimes echoes its prompt back when the clip is silent or very short.
-function looksLikePromptEcho(text) {
+function looksLikePromptEcho(text, prompt) {
   const norm = (s) =>
     s.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
   const t = norm(text);
-  return t.length > 3 && norm(HINGLISH_PROMPT).includes(t);
+  return t.length > 3 && norm(prompt).includes(t);
 }
 
 export default async function handler(req, res) {
@@ -39,15 +39,22 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Server misconfiguration: GROQ_API_KEY is missing.' });
     }
 
-    const { audioBase64, mimeType } = req.body;
+    const { audioBase64, mimeType, nameHint } = req.body;
     if (!audioBase64) return res.status(400).json({ error: 'No audio provided' });
+
+    // The dealer's name (e.g. "Gupta Ji") helps Whisper spell it correctly instead of
+    // hearing "पुक्ता जी". Only letters/digits/spaces are kept, max 40 characters.
+    const name = typeof nameHint === 'string'
+      ? nameHint.replace(/[^\p{L}\p{M}\p{N} ]/gu, '').trim().slice(0, 40)
+      : '';
+    const prompt = name ? `${HINGLISH_PROMPT} ${name} से बात हो रही है।` : HINGLISH_PROMPT;
 
     const buffer = Buffer.from(audioBase64, 'base64');
     const form = new FormData();
     form.append('file', new Blob([buffer], { type: mimeType || 'audio/webm' }), 'speech.webm');
     form.append('model', 'whisper-large-v3');
     form.append('language', LANGUAGE);
-    form.append('prompt', HINGLISH_PROMPT);
+    form.append('prompt', prompt);
     form.append('temperature', '0');
     form.append('response_format', 'json');
 
@@ -65,7 +72,7 @@ export default async function handler(req, res) {
 
     const data = await groqRes.json();
     let text = (data.text || '').trim();
-    if (looksLikePromptEcho(text)) text = '';
+    if (looksLikePromptEcho(text, prompt)) text = '';
     res.status(200).json({ text });
   } catch (err) {
     console.error('Unhandled error in /api/transcribe:', err);
