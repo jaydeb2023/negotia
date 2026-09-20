@@ -16,7 +16,7 @@ export const config = {
 // Keep it to plain vocabulary (NOT a full sales sentence): on quiet or unclear audio Whisper can
 // repeat prompt text as if it had been spoken. EDIT the word list to match your products.
 const HINGLISH_PROMPT =
-  'नमस्ते जी, मैं Transcend से बोल रहा हूँ। Product, margin, delivery, stock, price, discount, scheme, trial और order के बारे में बात हो रही है।';
+  'नमस्ते जी, मैं Transcend से बोल रहा हूँ। Product, contractor, Jodi, margin, delivery, stock, price, discount, scheme, trial और order के बारे में बात हो रही है।';
 
 // Override without a code change: set WHISPER_LANGUAGE in Vercel env vars
 // (e.g. "en"). Defaults to Hindi.

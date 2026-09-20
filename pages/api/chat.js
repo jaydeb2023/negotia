@@ -7,6 +7,27 @@ const MODEL = process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
 // leaving an EMPTY reply. So: bigger budget + low reasoning effort for these models.
 const IS_REASONING_MODEL = MODEL.startsWith('openai/gpt-oss');
 
+// ---- Safety net: remove leaked "thinking" from the spoken reply ----
+// Reasoning models sometimes paste their private notes into the answer, e.g.
+// "We need outcome: he should agree to trial." That would be read aloud to the trainee.
+const LEAK_PHRASES =
+  /\b(we need|we should|we must|we have to|i need to|i should respond|the user|the trainee|the dealer|system prompt|should agree|outcome:|respond as|reply as)\b/i;
+
+const latinLetters = (s) => (s.match(/[A-Za-z]/g) || []).length;
+const devanagariLetters = (s) => (s.match(/[\u0900-\u097F]/g) || []).length;
+
+// A sentence is a leak only if it is mostly English AND talks about the task itself.
+function isLeak(sentence) {
+  return LEAK_PHRASES.test(sentence) && latinLetters(sentence) > devanagariLetters(sentence) * 2;
+}
+
+function cleanReply(text) {
+  const parts = text.match(/[^।.!?\n]+[।.!?]*/g) || [text];
+  if (!parts.some(isLeak)) return text; // nothing suspicious: leave the reply untouched
+  console.warn('[chat] removed leaked reasoning from reply:', parts.filter(isLeak));
+  return parts.filter((p) => !isLeak(p)).join(' ').replace(/\s+/g, ' ').trim();
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
@@ -68,7 +89,8 @@ VOICE CALL RULES:
 
       const data = await groqRes.json();
       const choice = data.choices?.[0];
-      const reply = choice?.message?.content?.trim();
+      const rawReply = choice?.message?.content?.trim();
+      const reply = rawReply ? cleanReply(rawReply) : '';
 
       if (reply) return res.status(200).json({ reply });
 
