@@ -47,6 +47,18 @@ export default function Practice() {
     setTranscript((t) => [...t, { who, text }]);
   }
 
+  // Closing an AudioContext that's already closed throws InvalidStateError,
+  // and since .close() returns a promise, that error surfaces as an
+  // "Uncaught (in promise)" — easy to trigger if both the silence-detector
+  // and a manual "Done speaking" click fire close() around the same time.
+  function safeCloseAudioCtx() {
+    const ctx = audioCtxRef.current;
+    if (ctx && ctx.state !== 'closed') {
+      ctx.close().catch((err) => console.warn('AudioContext close ignored:', err.message));
+    }
+    audioCtxRef.current = null;
+  }
+
   function speak(text, onEnd) {
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 0.98;
@@ -57,31 +69,33 @@ export default function Practice() {
     // always eventually resume listening even if the browser event never
     // arrives.
     let done = false;
-    function finish() {
+    function finish(reason) {
       if (done) return;
       done = true;
       clearTimeout(fallbackTimer);
+      console.log('[speak] finished via:', reason);
       (onEnd || (() => {}))();
     }
 
     const estimatedMs = Math.max(2500, text.length * 90); // ~90ms/char, min 2.5s
-    const fallbackTimer = setTimeout(finish, estimatedMs + 4000); // generous buffer
+    const fallbackTimer = setTimeout(() => finish('fallback-timeout'), estimatedMs + 4000);
 
-    utter.onend = finish;
-    utter.onerror = finish;
+    utter.onend = () => finish('onend-event');
+    utter.onerror = (e) => { console.error('[speak] utterance error:', e.error); finish('onerror-event'); };
 
     setStatus('speaking');
+    console.log('[speak] starting, estimated duration ms:', estimatedMs);
     try {
       speechSynthesis.speak(utter);
     } catch (err) {
       console.error('speechSynthesis failed to start:', err);
-      finish();
+      finish('sync-throw');
     }
   }
 
   function stopEverything() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (audioCtxRef.current) audioCtxRef.current.close();
+    safeCloseAudioCtx();
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     setIsRecording(false);
   }
@@ -95,6 +109,7 @@ export default function Practice() {
   }
 
   async function startListening() {
+    console.log('[startListening] called');
     try {
       setStatus('listening');
       chunksRef.current = [];
@@ -118,9 +133,11 @@ export default function Practice() {
       mr.start();
       mediaRecorderRef.current = mr;
       setIsRecording(true);
+      console.log('[startListening] mic + recorder ready, now listening');
 
       monitorVolume();
     } catch (err) {
+      console.error('[startListening] failed:', err.name, err.message);
       setIsRecording(false);
       setStatus(err.name === 'NotAllowedError' ? 'mic-denied' : 'mic-error');
     }
@@ -161,7 +178,7 @@ export default function Practice() {
 
   function stopListeningAndSend() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (audioCtxRef.current) audioCtxRef.current.close();
+    safeCloseAudioCtx();
     mediaRecorderRef.current?.stop();
     setIsRecording(false);
   }
@@ -172,6 +189,7 @@ export default function Practice() {
   }
 
   async function handleRecordingStop() {
+    console.log('[handleRecordingStop] triggered');
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     setStatus('transcribing');
 
@@ -185,6 +203,7 @@ export default function Practice() {
     });
     const tData = await tRes.json();
     const said = tData.text?.trim();
+    console.log('[handleRecordingStop] transcribed:', said);
 
     if (!said) {
       setStatus('missed');
@@ -208,6 +227,7 @@ export default function Practice() {
     });
     const cData = await cRes.json();
     const reply = cData.reply || 'Thik hai, aage boliye.';
+    console.log('[handleRecordingStop] AI reply:', reply, '| started:', started);
     addBubble(scenario.name, reply);
     setHistory([...newHistory, { role: 'assistant', content: reply }]);
 
@@ -228,7 +248,7 @@ export default function Practice() {
     else if (/next week|think/i.test(lastLine)) { outcome = 'WP1'; }
     else if (/call kar lunga|busy/i.test(lastLine)) { outcome = 'WP2'; }
 
-    await supabase.from('sessions').insert([{
+    const { error: saveError } = await supabase.from('sessions').insert([{
       user_id: user.id,
       trainee_name: profile?.full_name || user.email,
       scenario_id: scenario.id,
@@ -238,6 +258,12 @@ export default function Practice() {
       cases_ordered: casesOrdered,
       behaviour_score: 0,
     }]);
+
+    if (saveError) {
+      console.error('[endCall] failed to save session:', saveError.message);
+    } else {
+      console.log('[endCall] session saved successfully');
+    }
 
     setStatus('idle');
   }
