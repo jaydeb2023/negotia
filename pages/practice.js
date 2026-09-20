@@ -457,6 +457,50 @@ export default function Practice() {
         <p>{scenario.tagline}</p>
       </div>
 
+      {!started && (
+        <div className="card" style={{ padding: '4px 20px', marginBottom: 16 }}>
+          <details open={!result}>
+            <summary style={{ cursor: 'pointer', fontWeight: 700, padding: '14px 0' }}>
+              📖 How this practice works
+            </summary>
+            <div style={{ paddingBottom: 16, lineHeight: 1.6 }}>
+              <p style={{ marginTop: 0 }}>
+                You will have a real <strong>voice conversation</strong> with <strong>{scenario.name}</strong>,
+                a dealer played by AI. <strong>Your goal:</strong> convince the dealer to agree to an order.
+                A small trial order counts as a success. Listen to his concerns, because pushing too hard
+                usually backfires.
+              </p>
+
+              <ol style={{ paddingLeft: 22, listStyle: 'decimal', margin: '8px 0' }}>
+                <li>Press <strong>Start Call</strong> and allow the microphone when your browser asks.</li>
+                <li>{scenario.name} speaks first. Wait until the screen says <strong>“Listening…”</strong>.</li>
+                <li>
+                  Speak in Hindi or Hinglish, one or two clear sentences, then stay quiet for about a second.
+                  Your words are sent automatically (or press <strong>Done speaking</strong>).
+                </li>
+                <li>The dealer answers by voice and the conversation appears below. Keep going back and forth.</li>
+                <li>When the dealer clearly agrees, postpones or refuses, press the red <strong>✕</strong> to end the call.</li>
+                <li>You get your outcome, a behaviour score and feedback. A successful call unlocks the next level.</li>
+              </ol>
+
+              <p style={{ marginBottom: 4 }}><strong>Tips</strong></p>
+              <ul style={{ paddingLeft: 22, listStyle: 'disc', margin: '4px 0' }}>
+                <li>Start politely and introduce yourself.</li>
+                <li>Ask questions to find his real concern before you pitch.</li>
+                <li>Answer his concern with one clear benefit at a time.</li>
+                <li>Offer a small first step (like a trial) instead of demanding a big order.</li>
+                <li>Confirm quantity and delivery before you end the call.</li>
+              </ul>
+
+              <p style={{ color: 'var(--muted)', marginBottom: 0 }}>
+                Works best on Chrome or Edge, in a quiet place, with a microphone. Wait for the dealer to
+                finish speaking before you talk.
+              </p>
+            </div>
+          </details>
+        </div>
+      )}
+
       {!started ? (
         <div className="card call-stage">
           <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
