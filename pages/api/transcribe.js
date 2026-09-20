@@ -6,22 +6,27 @@ export const config = {
   api: { bodyParser: { sizeLimit: '10mb' } },
 };
 
-// Trainees speak Hinglish (Hindi + English mixed). Forcing language='hi' makes Whisper
-// write every English word as Devanagari gibberish (e.g. "hello" -> "आवारीओ").
-// Instead we leave the language on auto-detect and give Whisper a short Roman-script
-// Hinglish sample. It uses this as a style + vocabulary hint (max ~224 tokens).
+// Trainees speak Hinglish (Hindi + English mixed).
+// - Auto-detect sometimes picks URDU and writes Arabic-style script, so we pin the
+//   language to Hindi ('hi').
+// - Pinning Hindi alone turned English words into Devanagari gibberish
+//   (e.g. "hello" -> "आवारीओ"). The prompt below fixes that: it is written the way
+//   we WANT the output to look (Hindi in Devanagari, English business words in
+//   English letters), and Whisper copies that style. Max ~224 tokens.
 // EDIT this to include names / product words your trainees actually say.
 const HINGLISH_PROMPT =
-  'Namaste Gupta ji, main Transcend se bol raha hoon. Aapko cases ka trial order chahiye? ' +
-  'Price, discount, scheme, delivery aur margin ke baare mein baat karte hain. Haan ji, theek hai.';
+  'नमस्ते गुप्ता जी, मैं Transcend से बोल रहा हूँ। क्या मैं आपको अपने product के बारे में बता सकता हूँ? ' +
+  'हमारा margin अच्छा है और delivery time पर होती है। आप दो case का trial order confirm कर दीजिए। ' +
+  'Price, discount, scheme और stock के बारे में बात करते हैं।';
 
-// Optional override without a code change: set WHISPER_LANGUAGE in Vercel env vars
-// (e.g. "hi" or "en"). Leave unset for auto-detect.
-const LANGUAGE = process.env.WHISPER_LANGUAGE;
+// Override without a code change: set WHISPER_LANGUAGE in Vercel env vars
+// (e.g. "en"). Defaults to Hindi.
+const LANGUAGE = process.env.WHISPER_LANGUAGE || 'hi';
 
 // Whisper sometimes echoes its prompt back when the clip is silent or very short.
 function looksLikePromptEcho(text) {
-  const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+  const norm = (s) =>
+    s.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
   const t = norm(text);
   return t.length > 3 && norm(HINGLISH_PROMPT).includes(t);
 }
@@ -42,7 +47,7 @@ export default async function handler(req, res) {
     const form = new FormData();
     form.append('file', new Blob([buffer], { type: mimeType || 'audio/webm' }), 'speech.webm');
     form.append('model', 'whisper-large-v3');
-    if (LANGUAGE) form.append('language', LANGUAGE);
+    form.append('language', LANGUAGE);
     form.append('prompt', HINGLISH_PROMPT);
     form.append('temperature', '0');
     form.append('response_format', 'json');

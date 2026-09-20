@@ -8,6 +8,42 @@ const SILENCE_DURATION_MS = 1200;  // how long you must be quiet before we auto-
 const MIN_SPEECH_MS = 500;         // must detect real speech for at least this long first
 const MIN_AUDIO_BYTES = 1500;      // recordings smaller than this are treated as "nothing said"
 
+// Split a reply into sentence-sized pieces for speech. Chrome's online voices tend to
+// cut off after ~15 seconds of continuous speech, so we speak short pieces one by one.
+function splitForSpeech(text, maxLen = 160) {
+  const sentences = text.match(/[^।.!?]+[।.!?]*/g) || [text];
+  const chunks = [];
+  let cur = '';
+  for (const s of sentences) {
+    if (cur && (cur + s).length > maxLen) {
+      chunks.push(cur.trim());
+      cur = s;
+    } else {
+      cur += s;
+    }
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks;
+}
+
+// Find a Hindi text-to-speech voice. Without one, the browser reads Devanagari with
+// its default English voice, which sounds wrong or stays silent.
+function pickHindiVoice() {
+  if (typeof speechSynthesis === 'undefined') return null;
+  const voices = speechSynthesis.getVoices();
+  const isHindi = (v) => (v.lang || '').replace('_', '-').toLowerCase().startsWith('hi');
+  return voices.find((v) => isHindi(v) && /google/i.test(v.name)) || voices.find(isHindi) || null;
+}
+
+// Backup scoring, only used if the AI judge (/api/score) fails.
+function fallbackScore(lastLine) {
+  if (/5\s*cases?|[५5]\s*केस|पाँच\s*केस|पांच\s*केस/i.test(lastLine)) return { outcome: 'RP2_success', casesOrdered: 5 };
+  if (/2\s*cases?|trial|[२2]\s*केस|दो\s*केस|ट्रायल/i.test(lastLine)) return { outcome: 'RP1_success', casesOrdered: 2 };
+  if (/next week|think|अगले\s*हफ्ते|सोच/i.test(lastLine)) return { outcome: 'WP1', casesOrdered: 0 };
+  if (/call kar lunga|busy|व्यस्त|बिज़ी/i.test(lastLine)) return { outcome: 'WP2', casesOrdered: 0 };
+  return { outcome: 'incomplete', casesOrdered: 0 };
+}
+
 export default function Practice() {
   const router = useRouter();
   const { scenario: scenarioId } = router.query;
@@ -20,17 +56,17 @@ export default function Practice() {
   const [status, setStatus] = useState('idle');
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState([]);
+  const [result, setResult] = useState(null);
 
   // ---- Live values (read from async callbacks) ----
-  // IMPORTANT: startListening / handleRecordingStop / speak callbacks are created
-  // in one render but run many seconds later. Anything they read from React state
-  // would be the OLD value from that render (this was the bug: `started` was always
-  // false and `history` always empty inside them). Refs always hold the current value.
+  // startListening / handleRecordingStop / speak callbacks are created in one render
+  // but run seconds later. Anything they read from React state would be the OLD value.
+  // Refs always hold the current value.
   const startedRef = useRef(false);
   const historyRef = useRef([]);
   const transcriptRef = useRef([]);
   const scenarioRef = useRef(null);
-  const utterRef = useRef(null); // keeps the utterance alive so Chrome doesn't GC it before onend fires
+  const utterRef = useRef([]); // keeps utterances alive so Chrome doesn't GC them before onend fires
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -51,6 +87,16 @@ export default function Practice() {
     }
     load();
   }, [scenarioId]);
+
+  // Chrome loads its voice list asynchronously. Touching it early makes sure the
+  // Hindi voice is available by the time Gupta Ji first speaks.
+  useEffect(() => {
+    if (typeof speechSynthesis === 'undefined') return;
+    speechSynthesis.getVoices();
+    const onVoices = () => speechSynthesis.getVoices();
+    speechSynthesis.addEventListener?.('voiceschanged', onVoices);
+    return () => speechSynthesis.removeEventListener?.('voiceschanged', onVoices);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -75,16 +121,21 @@ export default function Practice() {
   }
 
   function speak(text, onEnd) {
-    // Clear any stuck queue (Chrome sometimes leaves speechSynthesis paused/stuck).
-    speechSynthesis.cancel();
+    speechSynthesis.cancel(); // clear any stuck queue
 
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 0.98;
-    utterRef.current = utter;
+    const chunks = splitForSpeech(text);
+    if (chunks.length === 0) {
+      (onEnd || (() => {}))();
+      return;
+    }
+
+    const voice = pickHindiVoice();
+    console.log('[speak] voice:', voice ? `${voice.name} (${voice.lang})` : 'none found, using lang hint hi-IN');
 
     // Some browsers can silently fail to fire `onend`; a one-shot fallback timer
     // guarantees we always resume listening.
     let done = false;
+    let fallbackTimer;
     function finish(reason) {
       if (done) return;
       done = true;
@@ -94,15 +145,28 @@ export default function Practice() {
     }
 
     const estimatedMs = Math.max(2500, text.length * 90);
-    const fallbackTimer = setTimeout(() => finish('fallback-timeout'), estimatedMs + 4000);
+    fallbackTimer = setTimeout(() => finish('fallback-timeout'), estimatedMs + 4000);
 
-    utter.onend = () => finish('onend-event');
-    utter.onerror = (e) => { console.error('[speak] utterance error:', e.error); finish('onerror-event'); };
+    const utterances = chunks.map((chunk, i) => {
+      const u = new SpeechSynthesisUtterance(chunk);
+      u.lang = voice?.lang || 'hi-IN';
+      if (voice) u.voice = voice;
+      u.rate = 0.95;
+      if (i === chunks.length - 1) u.onend = () => finish('onend-event');
+      u.onerror = (e) => {
+        if (done) return;
+        console.error('[speak] utterance error:', e.error);
+        speechSynthesis.cancel();
+        finish('onerror-event');
+      };
+      return u;
+    });
+    utterRef.current = utterances;
 
     setStatus('speaking');
-    console.log('[speak] starting, estimated duration ms:', estimatedMs);
+    console.log('[speak] starting,', chunks.length, 'chunk(s), estimated duration ms:', estimatedMs);
     try {
-      speechSynthesis.speak(utter);
+      utterances.forEach((u) => speechSynthesis.speak(u));
     } catch (err) {
       console.error('speechSynthesis failed to start:', err);
       finish('sync-throw');
@@ -121,6 +185,7 @@ export default function Practice() {
     startedRef.current = true;
     historyRef.current = [];
     transcriptRef.current = [];
+    setResult(null);
     setStarted(true);
     setTranscript([]);
     addBubble(sc.name, sc.opening_line);
@@ -267,7 +332,7 @@ export default function Practice() {
       });
       if (!cRes.ok) throw new Error(`chat failed (${cRes.status})`);
       const cData = await cRes.json();
-      const reply = cData.reply || 'Thik hai, aage boliye.';
+      const reply = cData.reply || 'ठीक है, आगे बोलिए।';
       console.log('[handleRecordingStop] AI reply:', reply, '| started:', startedRef.current);
 
       if (!startedRef.current) return;
@@ -290,19 +355,40 @@ export default function Practice() {
     speechSynthesis.cancel();
     stopEverything();
     setStarted(false);
-    setStatus('saving');
+    setStatus('scoring');
 
     const sc = scenarioRef.current;
     const finalTranscript = transcriptRef.current;
+    const traineeSpoke = finalTranscript.some((t) => t.who === 'You');
 
-    const lastLine = [...finalTranscript].reverse().find((t) => t.who === sc.name)?.text || '';
     let outcome = 'incomplete';
     let casesOrdered = 0;
-    if (/5 cases/i.test(lastLine)) { outcome = 'RP2_success'; casesOrdered = 5; }
-    else if (/2 cases|trial/i.test(lastLine)) { outcome = 'RP1_success'; casesOrdered = 2; }
-    else if (/next week|think/i.test(lastLine)) { outcome = 'WP1'; }
-    else if (/call kar lunga|busy/i.test(lastLine)) { outcome = 'WP2'; }
+    let behaviourScore = 0;
+    let feedback = '';
 
+    if (traineeSpoke) {
+      try {
+        const sRes = await fetch('/api/score', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scenarioId: sc.id, transcript: finalTranscript }),
+        });
+        if (!sRes.ok) throw new Error(`score failed (${sRes.status})`);
+        const s = await sRes.json();
+        outcome = s.outcome;
+        casesOrdered = s.casesOrdered;
+        behaviourScore = s.behaviourScore;
+        feedback = s.feedback || '';
+      } catch (err) {
+        console.error('[endCall] AI scoring failed, using keyword fallback:', err);
+        const lastLine = [...finalTranscript].reverse().find((t) => t.who === sc.name)?.text || '';
+        const fb = fallbackScore(lastLine);
+        outcome = fb.outcome;
+        casesOrdered = fb.casesOrdered;
+      }
+    }
+
+    setStatus('saving');
     const { error: saveError } = await supabase.from('sessions').insert([{
       user_id: user.id,
       trainee_name: profile?.full_name || user.email,
@@ -311,7 +397,7 @@ export default function Practice() {
       transcript: finalTranscript,
       outcome,
       cases_ordered: casesOrdered,
-      behaviour_score: 0,
+      behaviour_score: behaviourScore,
     }]);
 
     if (saveError) {
@@ -320,6 +406,7 @@ export default function Practice() {
       console.log('[endCall] session saved successfully');
     }
 
+    setResult({ outcome, casesOrdered, behaviourScore, feedback, saved: !saveError });
     setStatus('idle');
   }
 
@@ -329,6 +416,7 @@ export default function Practice() {
     transcribing: 'Transcribing…',
     thinking: `${scenario?.name || 'They'} is thinking…`,
     speaking: `${scenario?.name || 'They'} is speaking…`,
+    scoring: 'Scoring your call…',
     saving: 'Saving session…',
     missed: "Didn't catch that — listening again…",
     error: 'Something went wrong — listening again…',
@@ -340,6 +428,8 @@ export default function Practice() {
     status === 'listening' ? 'ring-listen' :
     status === 'speaking' ? 'ring-speak' :
     status === 'thinking' ? 'ring-think' : '';
+
+  const busyAfterCall = status === 'scoring' || status === 'saving';
 
   if (loadingScenario) return <div className="page">Loading…</div>;
   if (!scenario) return <div className="page">Scenario not found. <a href="/">Go back</a></div>;
@@ -354,7 +444,14 @@ export default function Practice() {
       {!started ? (
         <div className="card call-stage">
           <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
-          <button className="btn-primary" style={{ marginTop: 22 }} onClick={startCall}>Start Call</button>
+          <button
+            className="btn-primary"
+            style={{ marginTop: 22 }}
+            onClick={startCall}
+            disabled={busyAfterCall}
+          >
+            {status === 'scoring' ? 'Scoring your call…' : status === 'saving' ? 'Saving…' : 'Start Call'}
+          </button>
         </div>
       ) : (
         <div className="card call-stage">
@@ -366,6 +463,23 @@ export default function Practice() {
             )}
             <button className="fab-end" onClick={endCall} aria-label="End call">✕</button>
           </div>
+        </div>
+      )}
+
+      {!started && result && (
+        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0 }}>Call result</h3>
+          <p>
+            <span className={`outcome-tag ${result.outcome}`}>{result.outcome}</span>
+            {' · '}Cases: <strong>{result.casesOrdered}</strong>
+            {' · '}Behaviour: <strong>{result.behaviourScore}/10</strong>
+          </p>
+          {result.feedback && <p>{result.feedback}</p>}
+          {!result.saved && (
+            <p style={{ color: 'var(--muted)' }}>
+              Note: this result could not be saved to the dashboard (check the console).
+            </p>
+          )}
         </div>
       )}
 

@@ -24,7 +24,11 @@ export default async function handler(req, res) {
 
 STRICT ADHERENCE: Follow every rule above exactly as written — the objection, what you reveal and when, and the exact outcome triggers. Do not invent new objections, new outcomes, or new information beyond what is written above. Do not soften or skip the reveal-gradually rule.
 
-VOICE CALL: You are speaking out loud on a phone call. Always reply with 1-2 short spoken sentences. Never reply with an empty message.`;
+VOICE CALL RULES:
+- You are speaking out loud on a phone call. Reply with 1-2 SHORT spoken sentences (under 30 words). Never reply with an empty message.
+- Respond ONLY to what the trainee just said. Never write the trainee's lines, never summarise the call, and never keep the conversation going on your own.
+- Do not agree to any order, trial or number of cases until the trainee has actually pitched a benefit AND answered your objection. Share your concerns one at a time, exactly as your rules say.
+- Language: speak natural Hindi in Devanagari script, keeping common business words (order, case, margin, delivery, stock, trial, price) in English letters. Your text is read aloud by a Hindi voice.`;
 
     const messages = [
       { role: 'system', content: systemPrompt + strictSuffix },
@@ -38,7 +42,8 @@ VOICE CALL: You are speaking out loud on a phone call. Always reply with 1-2 sho
       temperature: 0.35,
       max_completion_tokens: IS_REASONING_MODEL ? 1024 : 200,
     };
-    if (IS_REASONING_MODEL) body.reasoning_effort = 'low';
+    // "low" is fast; if Gupta Ji ignores his rules, set GROQ_REASONING_EFFORT=medium in Vercel.
+    if (IS_REASONING_MODEL) body.reasoning_effort = process.env.GROQ_REASONING_EFFORT || 'low';
 
     // Try up to 2 times: an occasional empty completion is retried instead of
     // being turned into a fake "Thik hai, aage boliye." line.
