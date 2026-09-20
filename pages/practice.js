@@ -11,7 +11,7 @@ export default function Practice() {
   const [scenario, setScenario] = useState(null);
   const [loadingScenario, setLoadingScenario] = useState(true);
   const [started, setStarted] = useState(false);
-  const [status, setStatus] = useState('idle'); // idle | listening | transcribing | thinking | speaking | saving | missed
+  const [status, setStatus] = useState('idle'); // idle | listening | transcribing | thinking | speaking | saving | missed | mic-denied | mic-error
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState([]);
   const [history, setHistory] = useState([]);
@@ -54,15 +54,24 @@ export default function Practice() {
       setIsRecording(false);
       return;
     }
-    setStatus('listening');
-    setIsRecording(true);
-    chunksRef.current = [];
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mr = new MediaRecorder(stream);
-    mr.ondataavailable = (e) => chunksRef.current.push(e.data);
-    mr.onstop = handleRecordingStop;
-    mr.start();
-    mediaRecorderRef.current = mr;
+    try {
+      setStatus('listening');
+      setIsRecording(true);
+      chunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = (e) => chunksRef.current.push(e.data);
+      mr.onstop = handleRecordingStop;
+      mr.start();
+      mediaRecorderRef.current = mr;
+    } catch (err) {
+      setIsRecording(false);
+      if (err.name === 'NotAllowedError') {
+        setStatus('mic-denied');
+      } else {
+        setStatus('mic-error');
+      }
+    }
   }
 
   async function handleRecordingStop() {
@@ -139,6 +148,8 @@ export default function Practice() {
     speaking: `${scenario?.name || 'They'} is speaking…`,
     saving: 'Saving session…',
     missed: "Didn't catch that — try again",
+    'mic-denied': "Microphone blocked — allow it in your browser's site settings, then reload",
+    'mic-error': 'Could not access microphone — try again',
   }[status] || status;
 
   const ringClass =
