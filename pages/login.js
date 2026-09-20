@@ -38,15 +38,23 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-shell">
+    <div className="auth-shell" style={{ minHeight: 'calc(100vh - 59px)' }}>
       <div className="auth-brandpanel">
         <div className="auth-brand-inner">
           {logoOk ? (
-            <img src="/logo.png" alt="Transcend" className="auth-logo-img" onError={() => setLogoOk(false)} />
+            <img
+              src="/logo.png"
+              alt="Transcend"
+              className="auth-logo-img"
+              style={{ height: 'auto', width: 260, maxWidth: '100%', marginBottom: 14 }}
+              onError={() => setLogoOk(false)}
+            />
           ) : (
-            <div className="brand-mark-lg">T</div>
+            <>
+              <div className="brand-mark-lg">T</div>
+              <h2>Transcend</h2>
+            </>
           )}
-          <h2>Transcend</h2>
           <p>Sales Negotiation Training Platform</p>
           <ul className="auth-features">
             <li>🎤 Voice-based practice with real AI personas</li>

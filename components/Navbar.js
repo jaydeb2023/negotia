@@ -18,13 +18,21 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <div className="navbar-inner">
-        <Link href="/" className="brand">
+        <Link href="/" className="brand" aria-label="Transcend home">
           {logoOk ? (
-            <img src="/logo.png" alt="Transcend" className="brand-logo-img" onError={() => setLogoOk(false)} />
+            <img
+              src="/logo.png"
+              alt="Transcend"
+              className="brand-logo-img"
+              style={{ height: 30, width: 'auto' }}
+              onError={() => setLogoOk(false)}
+            />
           ) : (
-            <span className="brand-mark">T</span>
+            <>
+              <span className="brand-mark">T</span>
+              Transcend
+            </>
           )}
-          Transcend
         </Link>
         {user && (
           <div className="nav-links">
