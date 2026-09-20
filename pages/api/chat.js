@@ -29,7 +29,7 @@ STRICT ADHERENCE: Follow every rule above exactly as written — the objection, 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages,
         temperature: 0.35,
         max_tokens: 200,
