@@ -50,9 +50,33 @@ export default function Practice() {
   function speak(text, onEnd) {
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 0.98;
-    utter.onend = onEnd || (() => {});
+
+    // Some browsers (notably Incognito Chrome) can silently fail to fire
+    // `onend`, leaving the app stuck on "speaking" forever. Guard against
+    // that with a one-shot fallback timer, sized to the text length, so we
+    // always eventually resume listening even if the browser event never
+    // arrives.
+    let done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      clearTimeout(fallbackTimer);
+      (onEnd || (() => {}))();
+    }
+
+    const estimatedMs = Math.max(2500, text.length * 90); // ~90ms/char, min 2.5s
+    const fallbackTimer = setTimeout(finish, estimatedMs + 4000); // generous buffer
+
+    utter.onend = finish;
+    utter.onerror = finish;
+
     setStatus('speaking');
-    speechSynthesis.speak(utter);
+    try {
+      speechSynthesis.speak(utter);
+    } catch (err) {
+      console.error('speechSynthesis failed to start:', err);
+      finish();
+    }
   }
 
   function stopEverything() {
