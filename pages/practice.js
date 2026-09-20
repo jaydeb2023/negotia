@@ -3,6 +3,10 @@ import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../lib/AuthContext';
 
+const SILENCE_THRESHOLD = 10;      // volume level (0-255) below which we count as "quiet"
+const SILENCE_DURATION_MS = 1200;  // how long you must be quiet before we auto-stop
+const MIN_SPEECH_MS = 500;         // must detect real speech for at least this long first
+
 export default function Practice() {
   const router = useRouter();
   const { scenario: scenarioId } = router.query;
@@ -11,12 +15,19 @@ export default function Practice() {
   const [scenario, setScenario] = useState(null);
   const [loadingScenario, setLoadingScenario] = useState(true);
   const [started, setStarted] = useState(false);
-  const [status, setStatus] = useState('idle'); // idle | listening | transcribing | thinking | speaking | saving | missed | mic-denied | mic-error
+  const [status, setStatus] = useState('idle');
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState([]);
   const [history, setHistory] = useState([]);
+
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const rafRef = useRef(null);
+  const streamRef = useRef(null);
+  const spokeSinceRef = useRef(null);
+  const quietSinceRef = useRef(null);
 
   useEffect(() => {
     if (!scenarioId) return;
@@ -27,6 +38,10 @@ export default function Practice() {
     }
     load();
   }, [scenarioId]);
+
+  useEffect(() => {
+    return () => stopEverything(); // cleanup on unmount
+  }, []);
 
   function addBubble(who, text) {
     setTranscript((t) => [...t, { who, text }]);
@@ -40,42 +55,102 @@ export default function Practice() {
     speechSynthesis.speak(utter);
   }
 
+  function stopEverything() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (audioCtxRef.current) audioCtxRef.current.close();
+    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    setIsRecording(false);
+  }
+
   async function startCall() {
     setStarted(true);
     setTranscript([]);
     setHistory([]);
     addBubble(scenario.name, scenario.opening_line);
-    speak(scenario.opening_line, () => setStatus('idle'));
+    speak(scenario.opening_line, startListening);
   }
 
-  async function toggleMic() {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
+  async function startListening() {
     try {
       setStatus('listening');
-      setIsRecording(true);
       chunksRef.current = [];
+      spokeSinceRef.current = null;
+      quietSinceRef.current = null;
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      audioCtxRef.current = audioCtx;
+      analyserRef.current = analyser;
+
       const mr = new MediaRecorder(stream);
       mr.ondataavailable = (e) => chunksRef.current.push(e.data);
       mr.onstop = handleRecordingStop;
       mr.start();
       mediaRecorderRef.current = mr;
+      setIsRecording(true);
+
+      monitorVolume();
     } catch (err) {
       setIsRecording(false);
-      if (err.name === 'NotAllowedError') {
-        setStatus('mic-denied');
-      } else {
-        setStatus('mic-error');
-      }
+      setStatus(err.name === 'NotAllowedError' ? 'mic-denied' : 'mic-error');
     }
   }
 
+  function monitorVolume() {
+    const analyser = analyserRef.current;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    function tick() {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = data[i] - 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      const now = Date.now();
+
+      if (rms > SILENCE_THRESHOLD) {
+        if (!spokeSinceRef.current) spokeSinceRef.current = now;
+        quietSinceRef.current = null;
+      } else {
+        if (!quietSinceRef.current) quietSinceRef.current = now;
+      }
+
+      const hasSpokenEnough = spokeSinceRef.current && (now - spokeSinceRef.current) > MIN_SPEECH_MS;
+      const isQuietLongEnough = quietSinceRef.current && (now - quietSinceRef.current) > SILENCE_DURATION_MS;
+
+      if (hasSpokenEnough && isQuietLongEnough) {
+        stopListeningAndSend();
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  function stopListeningAndSend() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (audioCtxRef.current) audioCtxRef.current.close();
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  }
+
+  function manualStop() {
+    // fallback button, in case auto-silence-detection doesn't trigger
+    stopListeningAndSend();
+  }
+
   async function handleRecordingStop() {
+    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     setStatus('transcribing');
+
     const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
     const base64 = await blobToBase64(blob);
 
@@ -86,8 +161,10 @@ export default function Practice() {
     });
     const tData = await tRes.json();
     const said = tData.text?.trim();
+
     if (!said) {
       setStatus('missed');
+      setTimeout(() => { if (started) startListening(); }, 1200);
       return;
     }
 
@@ -109,13 +186,14 @@ export default function Practice() {
     const reply = cData.reply || 'Thik hai, aage boliye.';
     addBubble(scenario.name, reply);
     setHistory([...newHistory, { role: 'assistant', content: reply }]);
-    speak(reply, () => setStatus('idle'));
+
+    speak(reply, () => { if (started) startListening(); }); // auto-loop back to listening
   }
 
   async function endCall() {
     speechSynthesis.cancel();
+    stopEverything();
     setStarted(false);
-    setIsRecording(false);
     setStatus('saving');
 
     const lastLine = [...transcript].reverse().find((t) => t.who === scenario.name)?.text || '';
@@ -141,13 +219,13 @@ export default function Practice() {
   }
 
   const statusLabel = {
-    idle: 'Tap the mic to speak',
-    listening: 'Listening…',
+    idle: 'Ready',
+    listening: 'Listening… (auto-stops when you finish talking)',
     transcribing: 'Transcribing…',
     thinking: `${scenario?.name || 'They'} is thinking…`,
     speaking: `${scenario?.name || 'They'} is speaking…`,
     saving: 'Saving session…',
-    missed: "Didn't catch that — try again",
+    missed: "Didn't catch that — listening again…",
     'mic-denied': "Microphone blocked — allow it in your browser's site settings, then reload",
     'mic-error': 'Could not access microphone — try again',
   }[status] || status;
@@ -177,14 +255,9 @@ export default function Practice() {
           <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
           <p className="call-status">{statusLabel}</p>
           <div className="call-controls">
-            <button
-              className={`fab-mic ${isRecording ? 'is-recording' : ''}`}
-              onClick={toggleMic}
-              disabled={status === 'thinking' || status === 'speaking'}
-              aria-label="Toggle microphone"
-            >
-              {isRecording ? '■' : '🎤'}
-            </button>
+            {isRecording && (
+              <button className="btn-ghost" onClick={manualStop}>Done speaking</button>
+            )}
             <button className="fab-end" onClick={endCall} aria-label="End call">✕</button>
           </div>
         </div>
