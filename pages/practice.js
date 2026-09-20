@@ -389,7 +389,7 @@ export default function Practice() {
     }
 
     setStatus('saving');
-    const { error: saveError } = await supabase.from('sessions').insert([{
+    const row = {
       user_id: user.id,
       trainee_name: profile?.full_name || user.email,
       scenario_id: sc.id,
@@ -398,15 +398,31 @@ export default function Practice() {
       outcome,
       cases_ordered: casesOrdered,
       behaviour_score: behaviourScore,
-    }]);
+    };
+    const saveError = await saveRow(row);
 
-    if (saveError) {
-      console.error('[endCall] failed to save session:', saveError.message);
-    } else {
-      console.log('[endCall] session saved successfully');
+    setResult({ outcome, casesOrdered, behaviourScore, feedback, row, saved: !saveError, saveError });
+    setStatus('idle');
+  }
+
+  // Inserts a finished session. Returns an error message (string) or null on success.
+  async function saveRow(row) {
+    const { error } = await supabase.from('sessions').insert([row]);
+    if (error) {
+      console.error('[save] failed to save session:', error);
+      return `${error.message}${error.code ? ` (code ${error.code})` : ''}${error.hint ? ` — hint: ${error.hint}` : ''}`;
     }
+    console.log('[save] session saved successfully');
+    return null;
+  }
 
-    setResult({ outcome, casesOrdered, behaviourScore, feedback, saved: !saveError });
+  // Lets the trainee re-try the save from the result card (e.g. after fixing the database)
+  // without having to redo the whole call.
+  async function retrySave() {
+    if (!result?.row) return;
+    setStatus('saving');
+    const saveError = await saveRow(result.row);
+    setResult({ ...result, saved: !saveError, saveError });
     setStatus('idle');
   }
 
@@ -475,10 +491,17 @@ export default function Practice() {
             {' · '}Behaviour: <strong>{result.behaviourScore}/10</strong>
           </p>
           {result.feedback && <p>{result.feedback}</p>}
-          {!result.saved && (
-            <p style={{ color: 'var(--muted)' }}>
-              Note: this result could not be saved to the dashboard (check the console).
-            </p>
+          {result.saved ? (
+            <p style={{ color: 'var(--muted)' }}>✓ Saved to the dashboard.</p>
+          ) : (
+            <div>
+              <p style={{ color: '#b42318' }}>
+                Could not save this result to the dashboard: <strong>{result.saveError}</strong>
+              </p>
+              <button className="btn-ghost" onClick={retrySave} disabled={busyAfterCall}>
+                {status === 'saving' ? 'Saving…' : 'Retry saving'}
+              </button>
+            </div>
           )}
         </div>
       )}
