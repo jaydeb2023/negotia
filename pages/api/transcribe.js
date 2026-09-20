@@ -17,6 +17,7 @@ export default async function handler(req, res) {
     const form = new FormData();
     form.append('file', new Blob([buffer], { type: mimeType || 'audio/webm' }), 'speech.webm');
     form.append('model', 'whisper-large-v3');
+    form.append('language', 'hi');
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
