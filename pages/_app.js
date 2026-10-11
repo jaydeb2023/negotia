@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { useEffect } from 'react';
 import Head from 'next/head';
 import Navbar from '../components/Navbar';
+import { SessionProvider } from 'next-auth/react';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 
 function Guard({ children }) {
@@ -22,6 +23,7 @@ function Guard({ children }) {
 
 export default function App({ Component, pageProps }) {
   return (
+    <SessionProvider session={pageProps.session}>
     <AuthProvider>
       <Head>
         <title>Transcend | Sales Negotiation Training</title>
@@ -32,5 +34,6 @@ export default function App({ Component, pageProps }) {
         <Component {...pageProps} />
       </Guard>
     </AuthProvider>
+    </SessionProvider>
   );
 }

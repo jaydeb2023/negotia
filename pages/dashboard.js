@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { api } from '../lib/http';
 
 export default function Dashboard() {
   const [sessions, setSessions] = useState([]);
@@ -7,8 +7,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase.from('sessions').select('*').order('created_at', { ascending: false });
-      if (!error) setSessions(data || []);
+      try {
+        setSessions((await api('/api/sessions?all=1')) || []);
+      } catch (err) {
+        console.error('[dashboard] load failed:', err);
+      }
       setLoading(false);
     }
     load();

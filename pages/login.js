@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '../lib/supabaseClient';
+import { signIn } from 'next-auth/react';
+import { api } from '../lib/http';
 
 export default function Login() {
   const [mode, setMode] = useState('signin');
@@ -16,25 +17,21 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setBusy(true);
-    if (mode === 'signup') {
-      const { error } = await supabase.auth.signUp({
-        email, password, options: { data: { full_name: fullName } },
-      });
-      if (error) setError(error.message);
+    try {
+      if (mode === 'signup') {
+        await api('/api/register', { method: 'POST', body: { email, password, fullName } });
+      }
+      const result = await signIn('credentials', { email, password, redirect: false });
+      if (result?.error) setError('Incorrect email or password.');
       else router.push('/');
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setError(error.message);
-      else router.push('/');
+    } catch (err) {
+      setError(err.message);
     }
     setBusy(false);
   }
 
   async function signInWithGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/` },
-    });
+    await signIn('google', { callbackUrl: '/' });
   }
 
   return (

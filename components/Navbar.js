@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
-import { supabase } from '../lib/supabaseClient';
+import { signOut } from 'next-auth/react';
 
 export default function Navbar() {
   const router = useRouter();
@@ -11,8 +11,7 @@ export default function Navbar() {
   const isActive = (path) => router.pathname === path;
 
   async function logout() {
-    await supabase.auth.signOut();
-    router.push('/login');
+    await signOut({ callbackUrl: '/login' });
   }
 
   return (

@@ -4,7 +4,7 @@
 // Request:  POST { scenarioId, transcript: [{ who, text }, ...] }
 // Response: { outcome, casesOrdered, behaviourScore (0-10), feedback }
 
-import { supabase } from '../../lib/supabaseClient';
+import { query } from '../../lib/db';
 
 const MODEL = process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
 const IS_REASONING_MODEL = MODEL.startsWith('openai/gpt-oss');
@@ -38,12 +38,10 @@ export default async function handler(req, res) {
     // Load the persona's own rules on the server (so the client can't feed us fake rules).
     let personaRules = '';
     if (scenarioId) {
-      const { data } = await supabase
-        .from('scenarios')
-        .select('system_prompt')
-        .eq('id', scenarioId)
-        .single();
-      personaRules = data?.system_prompt || '';
+      if (/^[0-9a-f-]{36}$/i.test(String(scenarioId))) {
+        const { rows } = await query('select system_prompt from scenarios where id = $1', [scenarioId]);
+        personaRules = rows[0]?.system_prompt || '';
+      }
     }
 
     const callText = transcript

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '../lib/supabaseClient';
+import { api } from '../lib/http';
 import { useAuth } from '../lib/AuthContext';
 
 const SILENCE_THRESHOLD = 10;      // volume level (0-255) below which we count as "quiet"
@@ -81,7 +81,8 @@ export default function Practice() {
   useEffect(() => {
     if (!scenarioId) return;
     async function load() {
-      const { data } = await supabase.from('scenarios').select('*').eq('id', scenarioId).single();
+      let data = null;
+      try { data = await api(`/api/scenarios/${scenarioId}`); } catch (err) { console.error('[practice] scenario load failed:', err); }
       scenarioRef.current = data;
       setScenario(data);
       setLoadingScenario(false);
@@ -425,13 +426,14 @@ export default function Practice() {
 
   // Inserts a finished session. Returns an error message (string) or null on success.
   async function saveRow(row) {
-    const { error } = await supabase.from('sessions').insert([row]);
-    if (error) {
-      console.error('[save] failed to save session:', error);
-      return `${error.message}${error.code ? ` (code ${error.code})` : ''}${error.hint ? ` — hint: ${error.hint}` : ''}`;
+    try {
+      await api('/api/sessions', { method: 'POST', body: row });
+      console.log('[save] session saved successfully');
+      return null;
+    } catch (err) {
+      console.error('[save] failed to save session:', err);
+      return err.message;
     }
-    console.log('[save] session saved successfully');
-    return null;
   }
 
   // Lets the trainee re-try the save from the result card (e.g. after fixing the database)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '../lib/supabaseClient';
+import { api } from '../lib/http';
 import { useAuth } from '../lib/AuthContext';
 
 const BLANK = { name: '', avatar_emoji: '🧑‍💼', difficulty: 1, tagline: '', opening_line: 'Hello, haan boliye.', system_prompt: '' };
@@ -23,14 +23,12 @@ export default function Admin() {
   }, [authLoading, isAdmin]);
 
   async function loadPersonas() {
-    const { data } = await supabase.from('scenarios').select('*').order('difficulty');
-    setScenarios(data || []);
+    try { setScenarios((await api('/api/scenarios?all=1')) || []); } catch (err) { console.error(err); }
     setLoading(false);
   }
 
   async function loadSessions() {
-    const { data } = await supabase.from('sessions').select('*').order('created_at', { ascending: false });
-    setSessions(data || []);
+    try { setSessions((await api('/api/sessions?all=1')) || []); } catch (err) { console.error(err); }
     setLoading(false);
   }
 
@@ -50,23 +48,27 @@ export default function Admin() {
     if (!form.name.trim() || !form.system_prompt.trim()) {
       alert('Name and system prompt are required'); return;
     }
-    if (editing === 'new') {
-      await supabase.from('scenarios').insert([{ ...form, difficulty: Number(form.difficulty) }]);
-    } else {
-      await supabase.from('scenarios').update({ ...form, difficulty: Number(form.difficulty) }).eq('id', editing);
+    try {
+      if (editing === 'new') {
+        await api('/api/scenarios', { method: 'POST', body: { ...form, difficulty: Number(form.difficulty) } });
+      } else {
+        await api(`/api/scenarios/${editing}`, { method: 'PUT', body: { ...form, difficulty: Number(form.difficulty) } });
+      }
+    } catch (err) {
+      alert(err.message); return;
     }
     cancel();
     loadPersonas();
   }
 
   async function toggleActive(s) {
-    await supabase.from('scenarios').update({ is_active: !s.is_active }).eq('id', s.id);
+    try { await api(`/api/scenarios/${s.id}`, { method: 'PUT', body: { is_active: !s.is_active } }); } catch (err) { alert(err.message); }
     loadPersonas();
   }
 
   async function remove(s) {
     if (!confirm(`Delete "${s.name}"? This can't be undone.`)) return;
-    await supabase.from('scenarios').delete().eq('id', s.id);
+    try { await api(`/api/scenarios/${s.id}`, { method: 'DELETE' }); } catch (err) { alert(err.message); }
     loadPersonas();
   }
 

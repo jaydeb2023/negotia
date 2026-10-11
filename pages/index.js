@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '../lib/supabaseClient';
+import { api } from '../lib/http';
 import { useAuth } from '../lib/AuthContext';
 
 const FILTERS = [
@@ -20,18 +20,16 @@ export default function Home() {
   useEffect(() => {
     if (!user) return;
     async function load() {
-      const { data: scenarioData } = await supabase
-        .from('scenarios')
-        .select('*')
-        .eq('is_active', true)
-        .order('difficulty', { ascending: true });
-      setScenarios(scenarioData || []);
-
-      const { data: sessionData } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('user_id', user.id);
-      setSessions(sessionData || []);
+      try {
+        const [scenarioData, sessionData] = await Promise.all([
+          api('/api/scenarios'),
+          api('/api/sessions'),
+        ]);
+        setScenarios(scenarioData || []);
+        setSessions(sessionData || []);
+      } catch (err) {
+        console.error('[home] load failed:', err);
+      }
 
       setLoading(false);
     }
