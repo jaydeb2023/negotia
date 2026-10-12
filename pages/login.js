@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { signIn } from 'next-auth/react';
 import { api } from '../lib/http';
+import { useAuth } from '../lib/AuthContext';
 
 export default function Login() {
   const [mode, setMode] = useState('signin');
@@ -12,6 +13,23 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [logoOk, setLogoOk] = useState(true);
   const router = useRouter();
+  const { user } = useAuth();
+
+  // Only allow going back to a page on this website.
+  const next = typeof router.query.next === 'string' && /^\/(?!\/)/.test(router.query.next) ? router.query.next : '/post-login';
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    if (router.query.mode === 'signup') setMode('signup');
+    const e = router.query.error;
+    if (e === 'ACCOUNT_DISABLED') setError('This account has been switched off. Please contact your company admin.');
+    else if (e === 'COMPANY_SUSPENDED') setError("Your company's access is paused. Please contact Transcend or your company admin.");
+    else if (e) setError('Sign-in did not work. Please try again.');
+  }, [router.isReady]);
+
+  useEffect(() => {
+    if (user) router.replace(next);
+  }, [user]);
 
   async function submit(e) {
     e.preventDefault();
@@ -22,8 +40,10 @@ export default function Login() {
         await api('/api/register', { method: 'POST', body: { email, password, fullName } });
       }
       const result = await signIn('credentials', { email, password, redirect: false });
-      if (result?.error) setError('Incorrect email or password.');
-      else router.push('/');
+      if (result?.error === 'ACCOUNT_DISABLED') setError('This account has been switched off. Please contact your company admin.');
+      else if (result?.error === 'COMPANY_SUSPENDED') setError("Your company's access is paused. Please contact Transcend or your company admin.");
+      else if (result?.error) setError('Incorrect email or password.');
+      else router.push(next);
     } catch (err) {
       setError(err.message);
     }
@@ -31,11 +51,11 @@ export default function Login() {
   }
 
   async function signInWithGoogle() {
-    await signIn('google', { callbackUrl: '/' });
+    await signIn('google', { callbackUrl: next });
   }
 
   return (
-    <div className="auth-shell" style={{ minHeight: 'calc(100vh - 59px)' }}>
+    <div className="auth-shell" style={{ minHeight: '100vh' }}>
       <div className="auth-brandpanel">
         <div className="auth-brand-inner">
           {logoOk ? (
@@ -92,7 +112,7 @@ export default function Login() {
             </div>
             <div className="field">
               <label>Password</label>
-              <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+              <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === 'signup' ? 8 : 1} />
             </div>
             {error && <p className="auth-error">{error}</p>}
             <button className="btn-primary" style={{ width: '100%' }} disabled={busy}>
@@ -100,14 +120,20 @@ export default function Login() {
             </button>
           </form>
 
+          {mode === 'signup' && <p className="auth-sub" style={{ marginTop: 10 }}>Use at least 8 characters.</p>}
           <p className="auth-switch">
             {mode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
             <a onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>
               {mode === 'signin' ? 'Sign up' : 'Sign in'}
             </a>
           </p>
+          <p className="auth-switch">
+            <a href="/company-signup">Sign up your company</a> · <a href="/">Back to website</a>
+          </p>
         </div>
       </div>
     </div>
   );
 }
+
+Login.public = true;

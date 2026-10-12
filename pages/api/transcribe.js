@@ -2,6 +2,11 @@
 // Receives raw audio (webm/wav) as a base64 string in the JSON body,
 // forwards it to Groq as multipart form-data.
 
+import { requireUser } from '../../lib/auth';
+import { allow } from '../../lib/ratelimit';
+
+const GROQ_BASE = process.env.GROQ_API_BASE || 'https://api.groq.com/openai/v1'; // override only for tests
+
 export const config = {
   api: { bodyParser: { sizeLimit: '10mb' } },
 };
@@ -30,10 +35,43 @@ function looksLikePromptEcho(text, prompt) {
   return t.length > 3 && norm(prompt).includes(t);
 }
 
+// Whisper can invent text on noise or silence. We ask for per-segment confidence and drop the doubtful parts.
+function keepConfidentText(data) {
+  if (!Array.isArray(data.segments) || !data.segments.length) return (data.text || '').trim();
+  const kept = data.segments.filter((seg) => {
+    if (seg.no_speech_prob > 0.6 && seg.avg_logprob < -0.7) return false; // probably silence or noise
+    if (seg.compression_ratio > 2.4) return false; // very repetitive text
+    if (seg.avg_logprob < -1.3) return false; // the model itself is unsure
+    return true;
+  });
+  return kept.map((seg) => seg.text).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+// The same word over and over ("हाँ हाँ हाँ हाँ हाँ") is a typical hallucination.
+function hasRunawayRepeat(text) {
+  const w = text.toLowerCase().split(/\s+/).filter(Boolean);
+  let run = 1;
+  for (let i = 1; i < w.length; i++) {
+    run = w[i] === w[i - 1] ? run + 1 : 1;
+    if (run >= 5) return true;
+  }
+  return false;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
+    let user = null;
+    try {
+      user = await requireUser(req, res);
+    } catch (e) {
+      return res.status(e.status || 401).json({ error: e.message });
+    }
+    if (!allow(`stt:${user.id}`, 60, 5 * 60 * 1000)) {
+      return res.status(429).json({ error: 'You are going too fast. Please wait a moment.' });
+    }
+
     if (!process.env.GROQ_API_KEY) {
       console.error('GROQ_API_KEY is not set in this environment.');
       return res.status(500).json({ error: 'Server misconfiguration: GROQ_API_KEY is missing.' });
@@ -56,9 +94,9 @@ export default async function handler(req, res) {
     form.append('language', LANGUAGE);
     form.append('prompt', prompt);
     form.append('temperature', '0');
-    form.append('response_format', 'json');
+    form.append('response_format', 'verbose_json');
 
-    const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    const groqRes = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
       body: form,
@@ -71,8 +109,8 @@ export default async function handler(req, res) {
     }
 
     const data = await groqRes.json();
-    let text = (data.text || '').trim();
-    if (looksLikePromptEcho(text, prompt)) text = '';
+    let text = keepConfidentText(data);
+    if (looksLikePromptEcho(text, prompt) || hasRunawayRepeat(text)) text = '';
     res.status(200).json({ text });
   } catch (err) {
     console.error('Unhandled error in /api/transcribe:', err);

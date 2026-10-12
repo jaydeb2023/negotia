@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { api } from '../lib/http';
 import { useAuth } from '../lib/AuthContext';
+import AppShell from '../components/AppShell';
 
-const SILENCE_THRESHOLD = 10;      // volume level (0-255) below which we count as "quiet"
+const SILENCE_THRESHOLD = 18;      // volume level (0-255) below which we count as "quiet" (raised so room noise is not sent as speech)
 const SILENCE_DURATION_MS = 1200;  // how long you must be quiet before we auto-stop
-const MIN_SPEECH_MS = 500;         // must detect real speech for at least this long first
+const MIN_SPEECH_MS = 700;         // must detect real speech for at least this long first
 const MIN_AUDIO_BYTES = 1500;      // recordings smaller than this are treated as "nothing said"
 
 // Split a reply into sentence-sized pieces for speech. Chrome's online voices tend to
@@ -219,7 +220,10 @@ export default function Practice() {
       spokeSinceRef.current = null;
       quietSinceRef.current = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        // Echo cancellation stops the dealer's own voice (from the speakers) being heard as the trainee.
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       if (!alive(callId)) { // ended while the permission prompt / mic was opening
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -343,9 +347,8 @@ export default function Practice() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          scenarioId: sc.id,
           history: historyRef.current,
-          systemPrompt: sc.system_prompt,
-          openingLine: sc.opening_line,
         }),
       });
       if (!cRes.ok) throw new Error(`chat failed (${cRes.status})`);
@@ -417,6 +420,7 @@ export default function Practice() {
       outcome,
       cases_ordered: casesOrdered,
       behaviour_score: behaviourScore,
+      feedback,
     };
     const saveError = await saveRow(row);
 
@@ -468,7 +472,7 @@ export default function Practice() {
   const busyAfterCall = status === 'scoring' || status === 'saving';
 
   if (loadingScenario) return <div className="page">Loading…</div>;
-  if (!scenario) return <div className="page">Scenario not found. <a href="/">Go back</a></div>;
+  if (!scenario) return <div className="page">Scenario not found. <a href="/app">Go back</a></div>;
 
   return (
     <div className="page">
@@ -602,3 +606,5 @@ function blobToBase64(blob) {
     reader.readAsDataURL(blob);
   });
 }
+
+Practice.getLayout = (page) => <AppShell title="Practice">{page}</AppShell>;

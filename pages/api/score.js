@@ -5,7 +5,10 @@
 // Response: { outcome, casesOrdered, behaviourScore (0-10), feedback }
 
 import { query } from '../../lib/db';
+import { requireUser } from '../../lib/auth';
+import { allow } from '../../lib/ratelimit';
 
+const GROQ_BASE = process.env.GROQ_API_BASE || 'https://api.groq.com/openai/v1'; // override only for tests
 const MODEL = process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
 const IS_REASONING_MODEL = MODEL.startsWith('openai/gpt-oss');
 
@@ -26,6 +29,16 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
+    let user = null;
+    try {
+      user = await requireUser(req, res);
+    } catch (e) {
+      return res.status(e.status || 401).json({ error: e.message });
+    }
+    if (!allow(`score:${user.id}`, 20, 5 * 60 * 1000)) {
+      return res.status(429).json({ error: 'You are going too fast. Please wait a moment.' });
+    }
+
     if (!process.env.GROQ_API_KEY) {
       return res.status(500).json({ error: 'Server misconfiguration: GROQ_API_KEY is missing.' });
     }
@@ -39,7 +52,11 @@ export default async function handler(req, res) {
     let personaRules = '';
     if (scenarioId) {
       if (/^[0-9a-f-]{36}$/i.test(String(scenarioId))) {
-        const { rows } = await query('select system_prompt from scenarios where id = $1', [scenarioId]);
+        const { rows } = await query(
+          `select system_prompt from scenarios
+            where id = $1 and (($2 = 'super_admin') or (is_active = true and (company_id is null or company_id = $3)))`,
+          [scenarioId, user.role, user.company_id]
+        );
         personaRules = rows[0]?.system_prompt || '';
       }
     }
@@ -84,7 +101,7 @@ ${callText}`;
 
     let parsed = null;
     for (let attempt = 1; attempt <= 2 && !parsed; attempt++) {
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const groqRes = await fetch(`${GROQ_BASE}/chat/completions`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
