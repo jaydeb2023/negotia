@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { api } from '../lib/http';
 import { useAuth } from '../lib/AuthContext';
 import AppShell from '../components/AppShell';
+import PracticeView from '../components/practice/PracticeView';
 
 const SILENCE_THRESHOLD = 18;      // volume level (0-255) below which we count as "quiet" (raised so room noise is not sent as speech)
 const SILENCE_DURATION_MS = 1200;  // how long you must be quiet before we auto-stop
@@ -58,6 +59,9 @@ export default function Practice() {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState([]);
   const [result, setResult] = useState(null);
+  const [startedAt, setStartedAt] = useState(null);
+  const [mySessions, setMySessions] = useState([]); // my earlier calls (for "your record" and "next dealer")
+  const [dealers, setDealers] = useState([]);
 
   // ---- Live values (read from async callbacks) ----
   // startListening / handleRecordingStop / speak callbacks are created in one render
@@ -67,6 +71,8 @@ export default function Practice() {
   const historyRef = useRef([]);
   const transcriptRef = useRef([]);
   const scenarioRef = useRef(null);
+  const levelRef = useRef(0); // live microphone level, read by the waveform animation
+  const startedAtRef = useRef(0);
   const callIdRef = useRef(0); // changes on every new/ended call, so late results from an OLD call are ignored
   const utterRef = useRef([]); // keeps utterances alive so Chrome doesn't GC them before onend fires
 
@@ -90,6 +96,14 @@ export default function Practice() {
     }
     load();
   }, [scenarioId]);
+
+  async function loadMySessions() {
+    try { setMySessions(await api('/api/sessions')); } catch { /* the screen works without it */ }
+  }
+  useEffect(() => {
+    loadMySessions();
+    api('/api/scenarios').then(setDealers).catch(() => {});
+  }, []);
 
   // Chrome loads its voice list asynchronously. Touching it early makes sure the
   // Hindi voice is available by the time Gupta Ji first speaks.
@@ -206,6 +220,8 @@ export default function Practice() {
     resetCallState();
     startedRef.current = true;
     const callId = callIdRef.current;
+    startedAtRef.current = Date.now();
+    setStartedAt(startedAtRef.current);
     setStarted(true);
     addBubble(sc.name, sc.opening_line);
     speak(sc.opening_line, () => startListening(callId));
@@ -266,6 +282,7 @@ export default function Practice() {
         sum += v * v;
       }
       const rms = Math.sqrt(sum / data.length);
+      levelRef.current = rms;
       const now = Date.now();
 
       if (rms > SILENCE_THRESHOLD) {
@@ -288,6 +305,7 @@ export default function Practice() {
   }
 
   function stopListeningAndSend() {
+    levelRef.current = 0;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     safeCloseAudioCtx();
     const mr = mediaRecorderRef.current;
@@ -423,8 +441,10 @@ export default function Practice() {
       feedback,
     };
     const saveError = await saveRow(row);
+    if (!saveError) loadMySessions();
 
-    setResult({ outcome, casesOrdered, behaviourScore, feedback, row, saved: !saveError, saveError });
+    const durationSec = startedAtRef.current ? Math.round((Date.now() - startedAtRef.current) / 1000) : 0;
+    setResult({ outcome, casesOrdered, behaviourScore, feedback, row, saved: !saveError, saveError, durationSec });
     setStatus('idle');
   }
 
@@ -446,155 +466,50 @@ export default function Practice() {
     if (!result?.row) return;
     setStatus('saving');
     const saveError = await saveRow(result.row);
+    if (!saveError) loadMySessions();
     setResult({ ...result, saved: !saveError, saveError });
     setStatus('idle');
   }
 
-  const statusLabel = {
-    idle: 'Ready',
-    listening: 'Listening… (auto-stops when you finish talking)',
-    transcribing: 'Transcribing…',
-    thinking: `${scenario?.name || 'They'} is thinking…`,
-    speaking: `${scenario?.name || 'They'} is speaking…`,
-    scoring: 'Scoring your call…',
-    saving: 'Saving session…',
-    missed: "Didn't catch that — listening again…",
-    error: 'Something went wrong — listening again…',
-    'mic-denied': "Microphone blocked — allow it in your browser's site settings, then reload",
-    'mic-error': 'Could not access microphone — try again',
-  }[status] || status;
+  if (loadingScenario) return <div className="pr"><p className="pr-muted" style={{ padding: 40 }}>Loading…</p></div>;
+  if (!scenario) {
+    return (
+      <div className="pr">
+        <div className="pr-card">Dealer not found. <a href="/app" className="pf-link">Back to all dealers</a></div>
+      </div>
+    );
+  }
 
-  const ringClass =
-    status === 'listening' ? 'ring-listen' :
-    status === 'speaking' ? 'ring-speak' :
-    status === 'thinking' ? 'ring-think' : '';
+  // Which screen to show: briefing, live call, scoring, or the result.
+  const phase = started ? 'call' : (status === 'scoring' || status === 'saving') && !result ? 'scoring' : result ? 'result' : 'brief';
 
-  const busyAfterCall = status === 'scoring' || status === 'saving';
-
-  if (loadingScenario) return <div className="page">Loading…</div>;
-  if (!scenario) return <div className="page">Scenario not found. <a href="/app">Go back</a></div>;
+  const mine = mySessions.filter((x) => x.scenario_id === scenario.id);
+  const scored = mine.filter((x) => x.outcome !== 'incomplete');
+  const attempts = {
+    count: mine.length,
+    wins: mine.filter((x) => x.outcome?.startsWith('RP')).length,
+    best: scored.length ? Math.max(...scored.map((x) => x.behaviour_score)) : null,
+  };
+  const nextDealer = dealers.filter((d) => d.difficulty > scenario.difficulty).sort((a, b) => a.difficulty - b.difficulty)[0] || null;
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>{scenario.name}</h1>
-        <p>{scenario.tagline}</p>
-      </div>
-
-      {!started && (
-        <div className="card" style={{ padding: '4px 20px', marginBottom: 16 }}>
-          <details open={!result}>
-            <summary style={{ cursor: 'pointer', fontWeight: 700, padding: '14px 0' }}>
-              📖 How this practice works
-            </summary>
-            <div style={{ paddingBottom: 16, lineHeight: 1.6 }}>
-              <p style={{ marginTop: 0 }}>
-                You will have a real <strong>voice conversation</strong> with <strong>{scenario.name}</strong>,
-                a dealer played by AI. <strong>Your goal:</strong> convince the dealer to agree to an order.
-                A small trial order counts as a success. Listen to his concerns, because pushing too hard
-                usually backfires.
-              </p>
-
-              <ol style={{ paddingLeft: 22, listStyle: 'decimal', margin: '8px 0' }}>
-                <li>Press <strong>Start Call</strong> and allow the microphone when your browser asks.</li>
-                <li>{scenario.name} speaks first. Wait until the screen says <strong>“Listening…”</strong>.</li>
-                <li>
-                  Speak in Hindi or Hinglish, one or two clear sentences, then stay quiet for about a second.
-                  Your words are sent automatically (or press <strong>Done speaking</strong>).
-                </li>
-                <li>The dealer answers by voice and the conversation appears below. Keep going back and forth.</li>
-                <li>When the dealer clearly agrees, postpones or refuses, press the red <strong>✕</strong> to end the call.</li>
-                <li>You get your outcome, a behaviour score and feedback. A successful call unlocks the next level.</li>
-              </ol>
-
-              <p style={{ marginBottom: 4 }}><strong>Tips</strong></p>
-              <ul style={{ paddingLeft: 22, listStyle: 'disc', margin: '4px 0' }}>
-                <li>Start politely and introduce yourself.</li>
-                <li>Ask questions to find his real concern before you pitch.</li>
-                <li>Answer his concern with one clear benefit at a time.</li>
-                <li>Offer a small first step (like a trial) instead of demanding a big order.</li>
-                <li>Confirm quantity and delivery before you end the call.</li>
-              </ul>
-
-              <p style={{ color: 'var(--muted)', marginBottom: 0 }}>
-                Works best on Chrome or Edge, in a quiet place, with a microphone. Wait for the dealer to
-                finish speaking before you talk.
-              </p>
-            </div>
-          </details>
-        </div>
-      )}
-
-      {!started ? (
-        <div className="card call-stage">
-          <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
-          <button
-            className="btn-primary"
-            style={{ marginTop: 22 }}
-            onClick={startCall}
-            disabled={busyAfterCall}
-          >
-            {status === 'scoring' ? 'Scoring your call…' : status === 'saving' ? 'Saving…' : result ? '🔄 Start new test' : 'Start Call'}
-          </button>
-        </div>
-      ) : (
-        <div className="card call-stage">
-          <div className={`avatar-circle ${ringClass}`}><span>{scenario.avatar_emoji}</span></div>
-          <p className="call-status">{statusLabel}</p>
-          <div className="call-controls">
-            {isRecording && (
-              <button className="btn-ghost" onClick={manualStop}>Done speaking</button>
-            )}
-            <button className="fab-end" onClick={endCall} aria-label="End call">✕</button>
-          </div>
-        </div>
-      )}
-
-      {!started && result && (
-        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Call result</h3>
-          <p>
-            <span className={`outcome-tag ${result.outcome}`}>{result.outcome}</span>
-            {' · '}Cases: <strong>{result.casesOrdered}</strong>
-            {' · '}Behaviour: <strong>{result.behaviourScore}/10</strong>
-          </p>
-          {result.feedback && <p>{result.feedback}</p>}
-          {result.saved ? (
-            <p style={{ color: 'var(--muted)' }}>✓ Saved to the dashboard.</p>
-          ) : (
-            <div>
-              <p style={{ color: '#b42318' }}>
-                Could not save this result to the dashboard: <strong>{result.saveError}</strong>
-              </p>
-              <button className="btn-ghost" onClick={retrySave} disabled={busyAfterCall}>
-                {status === 'saving' ? 'Saving…' : 'Retry saving'}
-              </button>
-            </div>
-          )}
-          <button
-            className="btn-primary"
-            style={{ marginTop: 8 }}
-            onClick={startCall}
-            disabled={busyAfterCall}
-          >
-            🔄 Start new test
-          </button>
-        </div>
-      )}
-
-      <div className="card transcript">
-        {!started && transcript.length > 0 && (
-          <p style={{ color: 'var(--muted)', fontSize: 13, margin: '0 0 8px' }}>
-            Previous call. Press “Start new test” to begin a fresh conversation.
-          </p>
-        )}
-        {transcript.map((t, i) => (
-          <div key={i} className={t.who === 'You' ? 'bubble you' : 'bubble gupta'}>
-            <span className="who">{t.who}</span>{t.text}
-          </div>
-        ))}
-      </div>
-    </div>
+    <PracticeView
+      phase={phase}
+      scenario={scenario}
+      status={status}
+      isRecording={isRecording}
+      transcript={transcript}
+      result={result}
+      startedAt={startedAt}
+      levelRef={levelRef}
+      attempts={attempts}
+      nextDealer={nextDealer}
+      backHref="/app"
+      onStart={startCall}
+      onEnd={endCall}
+      onDone={manualStop}
+      onRetrySave={retrySave}
+    />
   );
 }
 
