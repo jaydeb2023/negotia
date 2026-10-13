@@ -1,6 +1,7 @@
 import '../styles/globals.css';
 import '../styles/platform.css';
 import '../styles/practice.css';
+import '../styles/home.css';
 import { useRouter } from 'next/router';
 import { useEffect } from 'react';
 import Head from 'next/head';
