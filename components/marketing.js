@@ -27,7 +27,7 @@ export function TwoCtas({ dark = false }) {
 export function CtaBand({ title = 'Ready to train your team?', text = 'Start practicing today, or set up your company account.' }) {
   return (
     <section style={{ background: '#C9A55C' }}>
-      <div className="mk-wrap" style={{ maxWidth: 900, padding: '80px 32px', textAlign: 'center' }}>
+      <div className="mk-wrap hm-cta-wrap">
         <h2 style={{ margin: 0, fontFamily: 'var(--pf-display)', fontSize: 'clamp(30px,3.8vw,44px)', lineHeight: 1.15, color: '#12203F' }}>{title}</h2>
         <p style={{ margin: '18px auto 0', maxWidth: 560, fontSize: 18, lineHeight: 1.6, color: '#2A2410' }}>{text}</p>
         <div style={{ marginTop: 32, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 14 }}>

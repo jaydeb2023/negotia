@@ -162,13 +162,14 @@ export default function Home() {
           <div className="hm-tour">
             <div className="hm-tabs" role="tablist" aria-label="Product tour">
               {TOUR.map((t, i) => (
-                <button key={t.title} role="tab" aria-selected={tab === i} className={`hm-tab ${tab === i ? 'on' : ''}`} onClick={() => setTab(i)}>
+                <button key={t.title} role="tab" aria-selected={tab === i} className={`hm-tab ${tab === i ? 'on' : ''}`} onClick={(e) => { setTab(i); e.currentTarget.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }); }}>
                   <span className="n">{i + 1}</span>
                   <div><b>{t.title}</b><span>{t.text}</span></div>
                 </button>
               ))}
             </div>
             <div className="hm-stage" role="tabpanel"><TourMock tab={tab} /></div>
+            <p className="hm-desc">{TOUR[tab].text}</p>
           </div>
         </div>
       </section>
@@ -223,14 +224,14 @@ export default function Home() {
             <p className="mk-lead">Practice on your own, or set up your whole company. Pick the one that fits you.</p>
           </div>
           <div className="mk-cols" style={{ marginTop: 56, alignItems: 'stretch' }}>
-            <div className="mk-card" style={{ flexBasis: 440, padding: 40, display: 'flex', flexDirection: 'column' }}>
+            <div className="mk-card hm-plan" style={{ flexBasis: 440, display: 'flex', flexDirection: 'column' }}>
               <div className="mk-tag">PRACTICE APP</div>
               <h3 style={{ margin: '20px 0 0', fontSize: 28 }}>For individuals</h3>
               <p style={{ marginTop: 12 }}>Create an account and start practicing sales calls on your own, whenever you want.</p>
               <Checks items={['Voice calls with AI dealer personas', 'A score and feedback after every call', 'Harder levels unlock as you improve', 'Sign in with Google or email']} />
               <Link href="/login?mode=signup" className="mk-btn navy" style={{ marginTop: 32, alignSelf: 'flex-start' }}>Start practicing <Icon name="arrow" size={18} color="#fff" stroke={2} /></Link>
             </div>
-            <div className="mk-card" style={{ flexBasis: 440, padding: 40, display: 'flex', flexDirection: 'column', background: '#12203F', color: '#fff', border: 'none' }}>
+            <div className="mk-card hm-plan" style={{ flexBasis: 440, display: 'flex', flexDirection: 'column', background: '#12203F', color: '#fff', border: 'none' }}>
               <div className="mk-tag" style={{ background: '#24345C', color: '#E8C879' }}>ENTERPRISE</div>
               <h3 style={{ margin: '20px 0 0', fontSize: 28 }}>For companies</h3>
               <p style={{ marginTop: 12, color: '#B8C2DA' }}>Bring your whole team. Manage employees, assign training and follow everyone's progress from one dashboard.</p>
